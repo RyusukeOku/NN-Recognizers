@@ -1,6 +1,6 @@
 set -euo pipefail
 
-. recognizers/functions.bash
+. src/recognizers/functions.bash
 
 usage() {
   echo "Usage: $0 <base-directory> <language> <device>
@@ -41,16 +41,16 @@ sampler=$language_dir/sampler.pt
 
 mkdir -p "$language_dir"
 echo "writing $automaton"
-python recognizers/hand_picked_languages/save_automaton.py \
+python src/recognizers/hand_picked_languages/save_automaton.py \
   --name "$language" \
   --output "$automaton"
 echo "writing $sampler"
-python recognizers/string_sampling/prepare_sampler.py \
+python src/recognizers/string_sampling/prepare_sampler.py \
   --input "$automaton" \
   --output "$sampler" \
   --max-length 500 \
   --device "$device"
-python recognizers/string_sampling/sample_dataset.py \
+python src/recognizers/string_sampling/sample_dataset.py \
   --output "$language_dir" \
   --random-seed 123456789 \
   --sampler "$sampler" \
@@ -58,4 +58,4 @@ python recognizers/string_sampling/sample_dataset.py \
   --include-next-symbols \
   --skip-test-edit-distance \
   --device "$device"
-bash recognizers/neural_networks/prepare_language.bash "$base_dir" "$language"
+bash src/recognizers/neural_networks/prepare_language.bash "$base_dir" "$language"

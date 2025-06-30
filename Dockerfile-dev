@@ -1,32 +1,52 @@
 FROM python:3.12.2-bookworm
+
 # UTF-8 encoding is necessary for printing non-ASCII characters to the
 # terminal.
 ENV LC_ALL C.UTF-8
-# Install Poetry.
-# See https://python-poetry.org/docs/#installing-with-the-official-installer
-RUN POETRY_VERSION=1.8.2 && \
-    apt-get update -y && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        curl \
-        && \
-    cd /tmp && \
-    curl -sSL https://install.python-poetry.org > install-poetry.py && \
-    POETRY_HOME=/usr/local/poetry python3 install-poetry.py --version $POETRY_VERSION && \
-    rm install-poetry.py && \
-    apt-get purge -y \
-        curl \
-        && \
-    rm -rf /var/lib/apt/lists/*
-# Install less.
+
+# Install system dependencies for Poetry and less (as root)
 RUN apt-get update -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        curl \
         less \
-        && \
-    rm -rf /var/lib/apt/lists/*
+        sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Poetry (as root, but installed for system-wide access or specific user later)
+RUN POETRY_VERSION=1.8.2 && \
+    curl -sSL https://install.python-poetry.org | POETRY_HOME=/usr/local/poetry python3 - --version $POETRY_VERSION
 ENV PATH /usr/local/poetry/bin:${PATH}
-# Stores Python packages in the local directory.
-# See https://python-poetry.org/docs/configuration/#virtualenvsin-project-boolean
+
+# --- User setup ---
+ARG USERNAME=limu-pytorch
+ARG USER_UID=1000 # 必要に応じてホストOSのUIDに変更してください
+ARG USER_GID=$USER_UID
+
+# Create user and group, setup sudo (as root)
+RUN groupadd --gid $USER_GID $USERNAME \
+    && useradd --uid $USER_UID --gid $USER_GID -m -s /bin/bash $USERNAME \
+    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+    && chmod 0440 /etc/sudoers.d/$USERNAME
+
+# Create and set permissions for user's home, cache, and app directories (as root)
+RUN mkdir -p /home/${USERNAME}/.cache/pypoetry \
+    && mkdir -p /app \
+    && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME} \
+    && chown -R ${USERNAME}:${USERNAME} /app
+# --- End User setup ---
+
+# Switch to the non-root user
+USER $USERNAME
+
+# Set Poetry configuration to create virtualenv in project
 ENV POETRY_VIRTUALENVS_IN_PROJECT true
-# Add src/ to PYTHONPATH.
+
+# Add src/ to PYTHONPATH (if your project structure requires it)
 ENV PYTHONPATH /app/src:${PYTHONPATH}
+
+# Set working directory
 WORKDIR /app/
+
+# Optional: Copy project files and install dependencies if they should be part of the image
+# COPY --chown=${USERNAME}:${USERNAME} . /app/
+# RUN poetry install

@@ -24,16 +24,11 @@ from rau.unidirectional import (
 
 from .vocabulary import get_vocabularies
 
-from rau.tools.torch.compose import Composable # added
-from .ngram_head import NgramHead # added
-
 class RecognitionModelInterface(ModelInterface):
 
     def add_more_init_arguments(self, group):
         group.add_argument('--architecture', choices=['transformer', 'rnn', 'lstm'],
             help='The type of neural network architecture to use.')
-        group.add_argument('--add-ngram-head-n', type=int, default=4,
-            help='If greater than 0, add an n-gram head of size n to the model.') # added
         group.add_argument('--num-layers', type=int,
             help='(transformer, rnn, lstm) Number of layers.')
         group.add_argument('--d-model', type=int,
@@ -84,7 +79,6 @@ class RecognitionModelInterface(ModelInterface):
         )
         return dict(
             architecture=args.architecture,
-            add_ngram_head_n=args.add_ngram_head_n, #added
             num_layers=args.num_layers,
             d_model=args.d_model,
             num_heads=args.num_heads,
@@ -101,7 +95,6 @@ class RecognitionModelInterface(ModelInterface):
 
     def construct_model(self,
         architecture,
-        add_ngram_head_n, # added
         num_layers,
         d_model,
         num_heads,
@@ -117,9 +110,6 @@ class RecognitionModelInterface(ModelInterface):
     ):
         if architecture is None:
             raise ValueError
-        
-        output_size = 0 # この変数を早期に定義します # added
-
         # First, construct the part of the model that includes input embeddings
         # and outputs hidden representations.
         if architecture == 'transformer':
@@ -204,14 +194,6 @@ class RecognitionModelInterface(ModelInterface):
             output_size = hidden_units
         else:
             raise ValueError
-        
-        if add_ngram_head_n > 0: # added
-            ngram_head_layer = Composable(NgramHead(
-                n=add_ngram_head_n,
-                d_model=output_size
-            ))
-            embedding_layer_and_core = embedding_layer_and_core @ ngram_head_layer.tag('ngram_head')
-
         # Finally, add the output heads used for training.
         return (
             embedding_layer_and_core.tag('core') @
@@ -357,7 +339,7 @@ class RecognitionModelInterface(ModelInterface):
             input_tensor = input_tensor.clone()
             input_tensor[input_tensor == self.output_padding_index] = 0
         return (
-            ModelInput(input_tensor, last_index, positive_mask, input_tensor),
+            ModelInput(input_tensor, last_index, positive_mask),
             (
                 recognition_expected_tensor,
                 language_modeling_expected_tensor,
@@ -383,23 +365,20 @@ class RecognitionModelInterface(ModelInterface):
                 module.set_allow_reallocation(False)
 
     def get_logits(self, model, model_input):
-        tag_kwargs = dict(
-            core=dict(
-                include_first=not self.uses_bos
-            ),
-            output_heads=dict(
-                last_index=model_input.last_index,
-                positive_mask=model_input.positive_mask
-            )
-        )
-        if hasattr(model, 'ngram_head'):
-             tag_kwargs['ngram_head'] = {
-                 'input_ids': model_input.input_ids
-             }
-
+        # Note that for the transformer, it is unnecessary to pass a padding
+        # mask, because padding only occurs at the end of a sequence, and the
+        # model is already causally masked.
         return model(
             model_input.input_sequence,
-            tag_kwargs=tag_kwargs
+            tag_kwargs=dict(
+                core=dict(
+                    include_first=not self.uses_bos
+                ),
+                output_heads=dict(
+                    last_index=model_input.last_index,
+                    positive_mask=model_input.positive_mask
+                )
+            )
         )
 
 @dataclasses.dataclass
@@ -407,7 +386,6 @@ class ModelInput:
     input_sequence: torch.Tensor
     last_index: torch.Tensor
     positive_mask: Optional[torch.Tensor]
-    input_ids: torch.Tensor
 
 class OutputHeads(torch.nn.Module):
 

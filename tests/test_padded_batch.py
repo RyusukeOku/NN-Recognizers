@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from recognizers.neural_networks.vocabulary import VocabularyData
-from recognizers.neural_networks.model_interface import RecognitionModelInterface
+from recognizers.neural_networks.model_interface_original import RecognitionModelInterface
 from recognizers.neural_networks.training_loop import (
     RecognitionTrainingLoop,
     add_training_loop_arguments,

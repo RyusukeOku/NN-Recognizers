@@ -1,6 +1,6 @@
 set -euo pipefail
 
-. recognizers/functions.bash
+. src/recognizers/functions.bash
 
 usage() {
   echo "Usage: $0 <base-directory> <language>
@@ -32,7 +32,7 @@ for dataset in test-short-held-out test-edit-distance; do
   fi
 done
 
-python recognizers/neural_networks/prepare_data.py \
+python src/recognizers/neural_networks/prepare_data.py \
   --training-data "$language_dir" \
   --more-data validation-short \
   --more-data validation-long \

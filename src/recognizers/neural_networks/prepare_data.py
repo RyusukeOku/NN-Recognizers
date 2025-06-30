@@ -14,6 +14,42 @@ from rau.tasks.common.data_preparation import (
 from rau.tasks.language_modeling.vocabulary import build_softmax_vocab
 from rau.vocab import ToIntVocabularyBuilder, ToStringVocabularyBuilder
 
+def get_positional_token_types_in_file(path, unk_string):
+    """
+    ファイルからトークンを読み込み、位置情報を付加したトークンのセットを返します。
+    例: "the cat" -> {"the_0", "cat_1"}
+    """
+    def generate_positional_tokens():
+        with path.open() as fin:
+            for line in fin:
+                tokens = line.strip().split()
+                for i, token in enumerate(tokens):
+                    yield f"{token}_{i}" # トークンと位置を結合
+
+    return get_token_types(generate_positional_tokens(), unk_string)
+
+
+def prepare_positional_file(vocab, pair):
+    """
+    ファイル内の各トークンに位置情報を付加し、語彙を使って整数に変換します。
+    """
+    input_path, output_path = pair
+    print(f'preparing positional tokens in {input_path} => {output_path}', file=sys.stderr)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with input_path.open() as fin, torch.serialization.open_file(str(output_path), 'w') as fout:
+        data = []
+        for line in fin:
+            tokens = line.strip().split()
+            # 各トークンに位置情報を付加
+            positional_tokens = [f"{token}_{i}" for i, token in enumerate(tokens)]
+            try:
+                # 語彙を使って整数IDに変換
+                data.append(torch.tensor([vocab.to_int(t) for t in positional_tokens]))
+            except KeyError as e:
+                # 語彙にないトークンが見つかった場合のエラー
+                raise ValueError(f'{input_path}: unknown token: {e}')
+        torch.save(data, fout)
+
 def get_token_types_in_next_symbols_file(path, unk_string):
     """
     Get token types from the file containing all valid symbols.
@@ -141,6 +177,7 @@ def main():
         )
 
     unk_string = None if args.never_allow_unk else args.unk_string
+
     if args.use_next_symbols:
         # If we use next symbols data, build the vocabulary from that data,
         # as there can be more symbols than in the strings data.
@@ -177,6 +214,16 @@ def main():
         prepare_labels_file(labels_files)
         if args.use_next_symbols:
             prepare_valid_symbols_file(vocab, eos_index, next_symbols_files)
+
+    # for strings_files, labels_files, next_symbols_files in prepared_files:
+    #     # 元のprepare_fileの代わりに、新しく作成した関数を呼び出す
+    #     prepare_positional_file(vocab, strings_files)
+    #     # 他のファイルの準備は変更なし
+    #     prepare_labels_file(labels_files)
+    #     if args.use_next_symbols:
+    #         # 注意: next_symbolsの準備も位置情報に対応させる必要がありますが、
+    #         # ここでは簡単のため、文字列の準備に焦点を当てています。
+    #         prepare_valid_symbols_file(vocab, eos_index, next_symbols_files)
 
 if __name__ == '__main__':
     main()

@@ -1,6 +1,6 @@
 set -euo pipefail
 
-. recognizers/functions.bash
+. src/recognizers/functions.bash
 
 usage() {
   echo "Usage: $0 <language-dir> <model-dir>
@@ -27,7 +27,7 @@ done
 
 eval_dir=$model_dir/eval
 mkdir -p "$eval_dir"
-python recognizers/neural_networks/evaluate.py \
+python src/recognizers/neural_networks/evaluate.py \
   --training-data "$language_dir" \
   --batching-max-tokens 1024 \
   --load-model "$model_dir" \

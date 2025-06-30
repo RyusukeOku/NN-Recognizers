@@ -43,13 +43,13 @@ def load_prepared_data_from_directory(directory, model_interface):
     return list(zip(strings_data, zip(labels_data, next_symbols_data, strict=True), strict=True))
 
 def load_prepared_labels_file(path: pathlib.Path) -> list[bool]:
-    return torch.load(path)
+    return torch.load(path, weights_only=False)
 
 def load_prepared_next_symbols_file(
     path: pathlib.Path,
     labels: list[bool]
 ) -> Iterable[list[list[int]]]:
-    data = torch.load(path)
+    data = torch.load(path, weights_only=False)
     data_it = iter(data)
     for label in labels:
         if label:

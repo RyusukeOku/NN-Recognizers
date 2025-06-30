@@ -1,6 +1,6 @@
 set -euo pipefail
 
-. recognizers/functions.bash
+. src/recognizers/functions.bash
 
 usage() {
 echo "Usage: $0 <base-directory> <language>
@@ -28,11 +28,11 @@ automaton=$language_dir/automaton.pt
 sampler=$language_dir/sampler.pt
 
 mkdir -p "$language_dir"
-python recognizers/string_sampling/sample_dataset.py \
+python src/recognizers/string_sampling/sample_dataset.py \
   --output "$language_dir" \
   --random-seed 123456789 \
   --language "$language" \
   --include-log-probability \
   --include-next-symbols \
   --skip-test-edit-distance
-bash recognizers/neural_networks/prepare_language.bash "$base_dir" "$language"
+bash src/recognizers/neural_networks/prepare_language.bash "$base_dir" "$language"

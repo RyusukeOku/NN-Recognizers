@@ -1,6 +1,6 @@
 set -euo pipefail
 
-. recognizers/functions.bash
+. src/recognizers/functions.bash
 
 usage() {
 echo "Usage: $0 <base-directory> <language> <device>
@@ -37,7 +37,7 @@ esac
 
 language_dir=$(get_language_dir "$base_dir" "$language")
 sampler=$language_dir/sampler.pt
-python recognizers/string_sampling/sample_dataset.py \
+python src/recognizers/string_sampling/sample_dataset.py \
   --output "$language_dir" \
   --random-seed 123456789 \
   --sampler "$sampler" \
@@ -45,7 +45,7 @@ python recognizers/string_sampling/sample_dataset.py \
   --include-next-symbols \
   --skip-standard-datasets \
   --device "$device"
-python recognizers/neural_networks/prepare_data.py \
+python src/recognizers/neural_networks/prepare_data.py \
   --training-data "$language_dir" \
   --only-more-data \
   --more-data test-edit-distance \

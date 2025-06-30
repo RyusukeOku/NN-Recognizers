@@ -24,3 +24,5 @@ class LengthRestrictedBinaryAddition(LengthRestrictedBinaryArithmeticOperation):
 
     def get_length_weights(self):
         return (1, 1, 1)
+
+

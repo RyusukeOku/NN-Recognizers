@@ -1,6 +1,6 @@
 set -euo pipefail
 
-. recognizers/functions.bash
+. src/recognizers/functions.bash
 
 usage() {
   echo "Usage: $0 <base-directory> <language> <architecture> <loss-terms> \\
@@ -32,7 +32,7 @@ Train and evaluate a neural network on a language.
 }
 
 random_sample() {
-  python recognizers/neural_networks/random_sample.py "$@"
+  python src/recognizers/neural_networks/random_sample.py "$@"
 }
 
 base_dir=${1-}
@@ -50,7 +50,7 @@ progress_args=("$@")
 language_dir=$(get_language_dir "$base_dir" "$language")
 
 model_flags=($( \
-  python recognizers/neural_networks/get_architecture_args.py \
+  python src/recognizers/neural_networks/get_architecture_args.py \
     --architecture "$architecture" \
     --parameter-budget 64000 \
     --training-data "$language_dir" \
@@ -80,7 +80,8 @@ for loss_term in ${loss_terms//+/ }; do
 done
 
 model_dir=$(get_model_dir "$base_dir" "$language" "$architecture" "$loss_terms" "$validation_data" "$trial_no")
-python recognizers/neural_networks/train.py \
+python src/recognizers/neural_networks/train.py \
+  --device cuda \
   --output "$model_dir" \
   --training-data "$language_dir" \
   --validation-data "$validation_data" \
@@ -98,4 +99,4 @@ python recognizers/neural_networks/train.py \
   --learning-rate-decay-factor 0.5 \
   --examples-per-checkpoint 10000 \
   "${progress_args[@]}"
-bash recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir"
+bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir"

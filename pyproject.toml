@@ -8,7 +8,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "^3.12"
 torch = "^2.1.0"
-rau = {git = "git@github.com:bdusell/rau.git", rev = "28695a0e92436bd0354cd630b0443f122be123ec"}
+rau = {path = "./libs/rau", develop = true}
 scipy = "^1.13.1"
 matplotlib = "^3.9.0"
 frozendict = "^2.4.6"

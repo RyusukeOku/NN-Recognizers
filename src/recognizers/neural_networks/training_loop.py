@@ -13,7 +13,7 @@ from rau.tools.torch.model_interface import ModelInterface
 
 from .batching import group_into_batches
 from .data import VocabularyContainer
-from .model_interface import ModelInput
+from .model_interface_original import ModelInput
 
 def add_training_loop_arguments(parser):
     group = common_add_training_loop_arguments(parser,
