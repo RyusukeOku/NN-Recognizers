@@ -28,7 +28,7 @@ LANGUAGES=( \
   "${FINITE_AUTOMATON_LANGUAGES[@]}" \
   "${HAND_WRITTEN_LANGUAGES[@]}"
 )
-ARCHITECTURES=(transformer rnn lstm)
+ARCHITECTURES=(transformer) #rnn lstm)
 LOSS_TERMS=(rec rec+lm rec+ns rec+lm+ns)
 VALIDATION_SETS=(validation-{short,long})
 TRIALS=({1..10})

@@ -24,6 +24,9 @@ from rau.unidirectional import (
 
 from .vocabulary import get_vocabularies
 
+# 提案手法のモジュールをインポート
+from .resettable_positional_encoding import ResettablePositionalInputLayer
+
 from rau.tools.torch.compose import Composable # added
 from .ngram_head import NgramHead # added
 
@@ -32,7 +35,7 @@ class RecognitionModelInterface(ModelInterface):
     def add_more_init_arguments(self, group):
         group.add_argument('--architecture', choices=['transformer', 'rnn', 'lstm'],
             help='The type of neural network architecture to use.')
-        group.add_argument('--add-ngram-head-n', type=int, default=4,
+        group.add_argument('--add-ngram-head-n', type=int, default=0,
             help='If greater than 0, add an n-gram head of size n to the model.') # added
         group.add_argument('--num-layers', type=int,
             help='(transformer, rnn, lstm) Number of layers.')
@@ -64,6 +67,10 @@ class RecognitionModelInterface(ModelInterface):
         group.add_argument('--use-next-symbols-head', action='store_true', default=False,
             help='Add another head to the model that will be used '
                  'to add a next symbols objective to the loss function.')
+        group.add_argument('--positional-encoding', choices=['sinusoidal', 'resettable'], default='resettable',
+            help='(transformer only) The type of positional encoding to use.')
+        group.add_argument('--reset-symbols', type=str, default='+#-=×*()[]_POPUSH',
+            help='(transformer with resettable encoding only) The symbols that reset the position.')
         # group.add_argument(
         #     '--use-ngram-head', # ★これを追加
         #     action='store_true',
@@ -82,6 +89,10 @@ class RecognitionModelInterface(ModelInterface):
             use_bos=uses_bos,
             use_eos=uses_output_vocab
         )
+        reset_symbol_ids = None
+        if args.positional_encoding == 'resettable':
+            # to_intメソッドで語彙にない文字が来た場合のエラーを避ける
+            reset_symbol_ids = {input_vocab.to_int(s) for s in args.reset_symbols if s in input_vocab}
         return dict(
             architecture=args.architecture,
             add_ngram_head_n=args.add_ngram_head_n, #added
@@ -96,7 +107,9 @@ class RecognitionModelInterface(ModelInterface):
             input_vocabulary_size=len(input_vocab),
             output_vocabulary_size=len(output_vocab) if uses_output_vocab else None,
             bos_index=input_vocab.bos_index if uses_bos else None,
-            eos_index=output_vocab.eos_index if uses_output_vocab else None
+            eos_index=output_vocab.eos_index if uses_output_vocab else None,
+            positional_encoding=args.positional_encoding,
+            reset_symbol_ids=reset_symbol_ids
         )
 
     def construct_model(self,
@@ -113,7 +126,9 @@ class RecognitionModelInterface(ModelInterface):
         input_vocabulary_size,
         output_vocabulary_size,
         bos_index,
-        eos_index
+        eos_index,
+        positional_encoding,
+        reset_symbol_ids
     ):
         if architecture is None:
             raise ValueError
@@ -140,14 +155,26 @@ class RecognitionModelInterface(ModelInterface):
                 embedding_size=d_model,
                 use_padding=False
             )
-            embedding_layer_and_core = (
-                get_transformer_input_unidirectional(
+            if positional_encoding == 'resettable':
+                input_layer = ResettablePositionalInputLayer(
+                    vocabulary_size=input_vocabulary_size,
+                    d_model=d_model,
+                    reset_symbols=reset_symbol_ids,
+                    dropout=dropout,
+                    use_padding=False,
+                    shared_embeddings=shared_embeddings
+                )
+            else: # デフォルトの 'sinusoidal' の場合
+                input_layer = get_transformer_input_unidirectional(
                     vocabulary_size=input_vocabulary_size,
                     d_model=d_model,
                     dropout=dropout,
                     use_padding=False,
                     shared_embeddings=shared_embeddings
-                ) @
+                )
+
+            embedding_layer_and_core = (
+                input_layer @
                 UnidirectionalTransformerEncoderLayers(
                     num_layers=num_layers,
                     d_model=d_model,
@@ -157,6 +184,23 @@ class RecognitionModelInterface(ModelInterface):
                     use_final_layer_norm=True
                 ).main()
             )
+            # embedding_layer_and_core = (
+            #     get_transformer_input_unidirectional(
+            #         vocabulary_size=input_vocabulary_size,
+            #         d_model=d_model,
+            #         dropout=dropout,
+            #         use_padding=False,
+            #         shared_embeddings=shared_embeddings
+            #     ) @
+            #     UnidirectionalTransformerEncoderLayers(
+            #         num_layers=num_layers,
+            #         d_model=d_model,
+            #         num_heads=num_heads,
+            #         feedforward_size=feedforward_size,
+            #         dropout=dropout,
+            #         use_final_layer_norm=True
+            #     ).main()
+            # )
             output_size = d_model
         elif architecture in ('rnn', 'lstm'):
             if hidden_units is None:

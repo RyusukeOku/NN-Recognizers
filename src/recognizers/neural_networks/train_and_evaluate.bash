@@ -81,7 +81,6 @@ done
 
 model_dir=$(get_model_dir "$base_dir" "$language" "$architecture" "$loss_terms" "$validation_data" "$trial_no")
 python src/recognizers/neural_networks/train.py \
-  --device cuda \
   --output "$model_dir" \
   --training-data "$language_dir" \
   --validation-data "$validation_data" \
