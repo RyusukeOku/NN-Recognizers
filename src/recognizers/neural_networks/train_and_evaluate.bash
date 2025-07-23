@@ -84,7 +84,11 @@ python src/recognizers/neural_networks/train.py \
   --output "$model_dir" \
   --training-data "$language_dir" \
   --validation-data "$validation_data" \
-  --architecture "$architecture" \
+  --architecture 'hybrid_csg' \
+  --hybrid-base-architecture "$architecture" \
+  --embedding-size $(case "$architecture" in transformer) echo 32;; rnn) echo 79;; lstm) echo 40;; esac) \
+  --lba-hidden-size 32 \
+  --lba-n-steps 150 \
   "${model_flags[@]}" \
   --init-scale 0.1 \
   "${loss_term_flags[@]}" \

@@ -2,6 +2,7 @@ import dataclasses
 from typing import Optional
 
 import torch
+import torch.nn as nn
 
 from rau.models.common.shared_embeddings import get_shared_embeddings
 from rau.models.rnn import LSTM, SimpleRNN
@@ -23,66 +24,106 @@ from rau.unidirectional import (
 )
 
 from .vocabulary import get_vocabularies
-
-# 提案手法のモジュールをインポート
 from .resettable_positional_encoding import ResettablePositionalInputLayer
+from .ngram_head import NgramHead
+from .lba import NeuralLBA
 
-from rau.tools.torch.compose import Composable # added
-from .ngram_head import NgramHead # added
+@dataclasses.dataclass
+class ModelInput:
+    input_sequence: torch.Tensor
+    last_index: torch.Tensor
+    positive_mask: Optional[torch.Tensor]
+    input_ids: torch.Tensor
+
+class HybridCSGModel(nn.Module):
+    """
+    指定されたメインアーキテクチャ（Transformer, RNN, LSTM）と
+    NeuralLBAを組み合わせた汎用ハイブリッドモデル
+    """
+    def __init__(self,
+                 input_vocabulary_size,
+                 embedding_size,
+                 main_model,
+                 main_model_output_size,
+                 lba_hidden_size,
+                 lba_n_steps,
+                 device,
+                 shared_embeddings=None):
+        super().__init__()
+
+        self.embedding = EmbeddingLayer(
+            vocabulary_size=input_vocabulary_size,
+            output_size=embedding_size,
+            use_padding=False,
+            shared_embeddings=shared_embeddings
+        )
+        
+        self.main_model = main_model
+        self.sub_network = NeuralLBA(
+            input_size=embedding_size,
+            hidden_size=lba_hidden_size,
+            n_steps=lba_n_steps,
+            device=device
+        )
+        
+        self.classifier = nn.Linear(main_model_output_size + lba_hidden_size, 1)
+
+    def forward(self, input_sequence, last_index, **kwargs):
+        embedded = self.embedding(input_sequence)
+        
+        main_output_sequence = self.main_model(embedded, include_first=True)
+        last_main_hidden = torch.gather(
+            main_output_sequence,
+            1,
+            last_index[:, None, None].expand(-1, -1, main_output_sequence.size(2))
+        ).squeeze(1)
+        
+        lba_output = self.sub_network(embedded)
+        
+        combined_output = torch.cat((last_main_hidden, lba_output), dim=1)
+        
+        logits = self.classifier(combined_output).squeeze(-1)
+
+        return logits, None, None
 
 class RecognitionModelInterface(ModelInterface):
 
     def add_more_init_arguments(self, group):
-        group.add_argument('--architecture', choices=['transformer', 'rnn', 'lstm'],
+        group.add_argument('--architecture', choices=['transformer', 'rnn', 'lstm', 'hybrid_csg'],
             help='The type of neural network architecture to use.')
         group.add_argument('--add-ngram-head-n', type=int, default=0,
-            help='If greater than 0, add an n-gram head of size n to the model.') # added
+            help='If greater than 0, add an n-gram head of size n to the model.')
+        group.add_argument('--hybrid-base-architecture', choices=['transformer', 'rnn', 'lstm'],
+            help='(hybrid_csg) The base architecture to combine with the LBA.')
         group.add_argument('--num-layers', type=int,
             help='(transformer, rnn, lstm) Number of layers.')
         group.add_argument('--d-model', type=int,
-            help='(transformer) The size of the vector representations used '
-                 'in the transformer.')
+            help='(transformer) The size of the vector representations used in the transformer.')
         group.add_argument('--num-heads', type=int,
-            help='(transformer) The number of attention heads used in each '
-                 'layer.')
+            help='(transformer) The number of attention heads used in each layer.')
         group.add_argument('--feedforward-size', type=int,
-            help='(transformer) The size of the hidden layer of the '
-                 'feedforward network in each feedforward sublayer.')
+            help='(transformer) The size of the hidden layer of the feedforward network in each feedforward sublayer.')
         group.add_argument('--dropout', type=float,
-            help='(transformer) The dropout rate used throughout the '
-                 'transformer on input embeddings, sublayer function outputs, '
-                 'feedforward hidden layers, and attention weights. '
-                 '(rnn, lstm) The dropout rate used between all layers, '
-                 'including between the input embedding layer and the first '
-                 'layer, and between the last layer and the output layer.')
+            help='Dropout rate for all applicable layers.')
         group.add_argument('--hidden-units', type=int,
-            help='(rnn, lstm) Number of hidden units to use in the hidden '
-                 'state.')
+            help='(rnn, lstm) Number of hidden units to use in the hidden state.')
         group.add_argument('--init-scale', type=float,
-            help='The scale used for the uniform distribution from which '
-                 'certain parameters are initialized.')
+            help='The scale used for the uniform distribution from which certain parameters are initialized.')
         group.add_argument('--use-language-modeling-head', action='store_true', default=False,
-            help='Add a language modeling head to the model that will be used '
-                 'to add a language modeling objective to the loss function.')
+            help='Add a language modeling head to the model.')
         group.add_argument('--use-next-symbols-head', action='store_true', default=False,
-            help='Add another head to the model that will be used '
-                 'to add a next symbols objective to the loss function.')
-        group.add_argument('--positional-encoding', choices=['sinusoidal', 'resettable'], default='resettable',
+            help='Add a next symbols prediction head to the model.')
+        group.add_argument('--positional-encoding', choices=['sinusoidal', 'resettable'], default='sinusoidal',
             help='(transformer only) The type of positional encoding to use.')
         group.add_argument('--reset-symbols', type=str, default='+#-=×*()[]_POPUSH',
             help='(transformer with resettable encoding only) The symbols that reset the position.')
-        # group.add_argument(
-        #     '--use-ngram-head', # ★これを追加
-        #     action='store_true',
-        #     help='Use N-gram Head layer in the model.')
-        # group.add_argument(
-        #     '--ngram-head-n-value', # ★これを追加
-        #     type=int,
-        #     default=3,
-        #     help='The "n" value for the N-gram Head.')
+        group.add_argument('--embedding-size', type=int, help='(hybrid_csg) Embedding size.')
+        group.add_argument('--lba-hidden-size', type=int, default=40, help='(hybrid_csg) Hidden size for NeuralLBA.')
+        group.add_argument('--lba-n-steps', type=int, default=100, help='(hybrid_csg) Number of steps for NeuralLBA.')
+
 
     def get_kwargs(self, args, vocabulary_data):
-        uses_bos = args.architecture == 'transformer'
+        uses_bos = args.architecture == 'transformer' or (args.architecture == 'hybrid_csg' and args.hybrid_base_architecture == 'transformer')
         uses_output_vocab = args.use_language_modeling_head or args.use_next_symbols_head
         input_vocab, output_vocab = get_vocabularies(
             vocabulary_data,
@@ -91,11 +132,13 @@ class RecognitionModelInterface(ModelInterface):
         )
         reset_symbol_ids = None
         if args.positional_encoding == 'resettable':
-            # to_intメソッドで語彙にない文字が来た場合のエラーを避ける
             reset_symbol_ids = {input_vocab.to_int(s) for s in args.reset_symbols if s in input_vocab}
+        
         return dict(
             architecture=args.architecture,
-            add_ngram_head_n=args.add_ngram_head_n, #added
+            add_ngram_head_n=getattr(args, 'add_ngram_head_n', 0),
+            hybrid_base_architecture=getattr(args, 'hybrid_base_architecture', None),
+            embedding_size=getattr(args, 'embedding_size', None),
             num_layers=args.num_layers,
             d_model=args.d_model,
             num_heads=args.num_heads,
@@ -109,137 +152,100 @@ class RecognitionModelInterface(ModelInterface):
             bos_index=input_vocab.bos_index if uses_bos else None,
             eos_index=output_vocab.eos_index if uses_output_vocab else None,
             positional_encoding=args.positional_encoding,
-            reset_symbol_ids=reset_symbol_ids
+            reset_symbol_ids=reset_symbol_ids,
+            lba_hidden_size=getattr(args, 'lba_hidden_size', 40),
+            lba_n_steps=getattr(args, 'lba_n_steps', 50)
         )
 
-    def construct_model(self,
-        architecture,
-        add_ngram_head_n, # added
-        num_layers,
-        d_model,
-        num_heads,
-        feedforward_size,
-        dropout,
-        hidden_units,
-        use_language_modeling_head,
-        use_next_symbols_head,
-        input_vocabulary_size,
-        output_vocabulary_size,
-        bos_index,
-        eos_index,
-        positional_encoding,
-        reset_symbol_ids
-    ):
+    def construct_model(self, architecture, **kwargs):
         if architecture is None:
             raise ValueError
         
-        output_size = 0 # この変数を早期に定義します # added
+        if architecture == 'hybrid_csg':
+            return self._construct_hybrid_model(**kwargs)
+        else:
+            return self._construct_standard_model(architecture=architecture, **kwargs)
 
-        # First, construct the part of the model that includes input embeddings
-        # and outputs hidden representations.
+    def _construct_hybrid_model(self, hybrid_base_architecture, embedding_size, num_layers, dropout, d_model, num_heads, feedforward_size, hidden_units, input_vocabulary_size, lba_hidden_size, lba_n_steps, **kwargs):
+        if hybrid_base_architecture is None: raise ValueError("For hybrid_csg, --hybrid-base-architecture must be specified.")
+        if embedding_size is None: raise ValueError("For hybrid_csg, --embedding-size must be specified.")
+        if dropout is None: raise ValueError("--dropout is required for hybrid_csg")
+        if num_layers is None: raise ValueError("--num-layers is required for hybrid_csg")
+        
+        if hybrid_base_architecture == 'transformer':
+            if d_model is None or num_heads is None or feedforward_size is None: raise ValueError("Transformer parameters are required for hybrid transformer.")
+            if embedding_size != d_model: raise ValueError("For hybrid transformer, --embedding-size must equal --d-model.")
+            
+            main_model = UnidirectionalTransformerEncoderLayers(
+                num_layers=num_layers, d_model=d_model, num_heads=num_heads,
+                feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
+            )
+            main_model_output_size = d_model
+        
+        elif hybrid_base_architecture in ('rnn', 'lstm'):
+            if hidden_units is None: raise ValueError("--hidden-units is required for hybrid RNN/LSTM.")
+            
+            RecurrentModel = SimpleRNN if hybrid_base_architecture == 'rnn' else LSTM
+            core = RecurrentModel(input_size=embedding_size, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
+            main_model = core.main() @ DropoutUnidirectional(dropout)
+            main_model_output_size = hidden_units
+        else:
+            raise ValueError(f"Unknown hybrid base architecture: {hybrid_base_architecture}")
+
+        return HybridCSGModel(
+            input_vocabulary_size=input_vocabulary_size, embedding_size=embedding_size,
+            main_model=main_model, main_model_output_size=main_model_output_size,
+            lba_hidden_size=lba_hidden_size, lba_n_steps=lba_n_steps,
+            device=self.get_device(None)
+        )
+
+    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, **kwargs):
+        core_pipeline = None
+        output_size = 0
+        shared_embeddings = None
+
         if architecture == 'transformer':
-            if num_layers is None:
-                raise ValueError
-            if d_model is None:
-                raise ValueError
-            if num_heads is None:
-                raise ValueError
-            if feedforward_size is None:
-                raise ValueError
-            if dropout is None:
-                raise ValueError
+            if num_layers is None or d_model is None or num_heads is None or feedforward_size is None or dropout is None:
+                raise ValueError("Transformer parameters are required.")
+            
             shared_embeddings = get_shared_embeddings(
-                tie_embeddings=use_language_modeling_head,
-                input_vocabulary_size=input_vocabulary_size,
-                output_vocabulary_size=output_vocabulary_size,
-                embedding_size=d_model,
-                use_padding=False
+                tie_embeddings=use_language_modeling_head, input_vocabulary_size=input_vocabulary_size,
+                output_vocabulary_size=output_vocabulary_size, embedding_size=d_model, use_padding=False
             )
             if positional_encoding == 'resettable':
                 input_layer = ResettablePositionalInputLayer(
-                    vocabulary_size=input_vocabulary_size,
-                    d_model=d_model,
-                    reset_symbols=reset_symbol_ids,
-                    dropout=dropout,
-                    use_padding=False,
-                    shared_embeddings=shared_embeddings
-                )
-            else: # デフォルトの 'sinusoidal' の場合
-                input_layer = get_transformer_input_unidirectional(
-                    vocabulary_size=input_vocabulary_size,
-                    d_model=d_model,
-                    dropout=dropout,
-                    use_padding=False,
-                    shared_embeddings=shared_embeddings
-                )
-
-            embedding_layer_and_core = (
-                input_layer @
-                UnidirectionalTransformerEncoderLayers(
-                    num_layers=num_layers,
-                    d_model=d_model,
-                    num_heads=num_heads,
-                    feedforward_size=feedforward_size,
-                    dropout=dropout,
-                    use_final_layer_norm=True
-                ).main()
-            )
-            # embedding_layer_and_core = (
-            #     get_transformer_input_unidirectional(
-            #         vocabulary_size=input_vocabulary_size,
-            #         d_model=d_model,
-            #         dropout=dropout,
-            #         use_padding=False,
-            #         shared_embeddings=shared_embeddings
-            #     ) @
-            #     UnidirectionalTransformerEncoderLayers(
-            #         num_layers=num_layers,
-            #         d_model=d_model,
-            #         num_heads=num_heads,
-            #         feedforward_size=feedforward_size,
-            #         dropout=dropout,
-            #         use_final_layer_norm=True
-            #     ).main()
-            # )
-            output_size = d_model
-        elif architecture in ('rnn', 'lstm'):
-            if hidden_units is None:
-                raise ValueError
-            if num_layers is None:
-                raise ValueError
-            if dropout is None:
-                raise ValueError
-            shared_embeddings = get_shared_embeddings(
-                tie_embeddings=use_language_modeling_head,
-                input_vocabulary_size=input_vocabulary_size,
-                output_vocabulary_size=output_vocabulary_size,
-                embedding_size=hidden_units,
-                use_padding=False
-            )
-            # Construct the recurrent hidden state module.
-            if architecture == 'rnn':
-                core = SimpleRNN(
-                    input_size=hidden_units,
-                    hidden_units=hidden_units,
-                    layers=num_layers,
-                    dropout=dropout,
-                    learned_hidden_state=True
+                    vocabulary_size=input_vocabulary_size, d_model=d_model, reset_symbols=reset_symbol_ids,
+                    dropout=dropout, use_padding=False, shared_embeddings=shared_embeddings
                 )
             else:
-                core = LSTM(
-                    input_size=hidden_units,
-                    hidden_units=hidden_units,
-                    layers=num_layers,
-                    dropout=dropout,
-                    learned_hidden_state=True
+                input_layer = get_transformer_input_unidirectional(
+                    vocabulary_size=input_vocabulary_size, d_model=d_model, dropout=dropout,
+                    use_padding=False, shared_embeddings=shared_embeddings
                 )
-            # Now, add the input embedding layer and dropout layers.
-            embedding_layer_and_core = (
+            
+            core_pipeline = (
+                input_layer @
+                UnidirectionalTransformerEncoderLayers(
+                    num_layers=num_layers, d_model=d_model, num_heads=num_heads,
+                    feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
+                ).main()
+            )
+            output_size = d_model
+
+        elif architecture in ('rnn', 'lstm'):
+            if hidden_units is None or num_layers is None or dropout is None:
+                raise ValueError("RNN/LSTM parameters are required.")
+
+            shared_embeddings = get_shared_embeddings(
+                tie_embeddings=use_language_modeling_head, input_vocabulary_size=input_vocabulary_size,
+                output_vocabulary_size=output_vocabulary_size, embedding_size=hidden_units, use_padding=False
+            )
+            RecurrentModel = SimpleRNN if architecture == 'rnn' else LSTM
+            core = RecurrentModel(input_size=hidden_units, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
+            core_pipeline = (
                 EmbeddingUnidirectional(
-                    vocabulary_size=input_vocabulary_size,
-                    output_size=hidden_units,
-                    use_padding=False,
-                    shared_embeddings=shared_embeddings
+                    vocabulary_size=input_vocabulary_size, output_size=hidden_units,
+                    use_padding=False, shared_embeddings=shared_embeddings
                 ) @
                 DropoutUnidirectional(dropout) @
                 core.main() @
@@ -247,24 +253,18 @@ class RecognitionModelInterface(ModelInterface):
             )
             output_size = hidden_units
         else:
-            raise ValueError
+            raise ValueError(f"Unknown standard architecture: {architecture}")
         
-        if add_ngram_head_n > 0: # added
-            ngram_head_layer = Composable(NgramHead(
-                n=add_ngram_head_n,
-                d_model=output_size
-            ))
-            embedding_layer_and_core = embedding_layer_and_core @ ngram_head_layer.tag('ngram_head')
+        if add_ngram_head_n > 0:
+            ngram_head_layer = NgramHead(n=add_ngram_head_n, d_model=output_size)
+            core_pipeline = core_pipeline @ Composable(ngram_head_layer).tag('ngram_head')
 
-        # Finally, add the output heads used for training.
         return (
-            embedding_layer_and_core.tag('core') @
+            Composable(core_pipeline).tag('core') @
             Composable(
                 OutputHeads(
-                    input_size=output_size,
-                    use_language_modeling_head=use_language_modeling_head,
-                    use_next_symbols_head=use_next_symbols_head,
-                    vocabulary_size=output_vocabulary_size,
+                    input_size=output_size, use_language_modeling_head=use_language_modeling_head,
+                    use_next_symbols_head=use_next_symbols_head, vocabulary_size=output_vocabulary_size,
                     shared_embeddings=shared_embeddings
                 )
             ).tag('output_heads')
@@ -276,16 +276,15 @@ class RecognitionModelInterface(ModelInterface):
         smart_init(model, generator, fallback=uniform_fallback(args.init_scale))
 
     def on_saver_constructed(self, args, saver):
-        # See comments in prepare_batch().
-        # bos_index will be None if the model doesn't use BOS.
         self.bos_index = saver.kwargs['bos_index']
         self.uses_bos = self.bos_index is not None
-        # eos_index and output_padding_index will be None if the model doesn't
-        # need an output vocabulary.
         self.eos_index = saver.kwargs['eos_index']
         self.uses_eos = self.eos_index is not None
         self.use_language_modeling_head = saver.kwargs['use_language_modeling_head']
         self.use_next_symbols_head = saver.kwargs['use_next_symbols_head']
+        self.add_ngram_head_n = saver.kwargs.get('add_ngram_head_n', 0)
+        self.architecture = saver.kwargs.get('architecture')
+
         if self.use_language_modeling_head:
             self.output_padding_index = saver.kwargs['output_vocabulary_size']
         else:
@@ -296,110 +295,58 @@ class RecognitionModelInterface(ModelInterface):
             self.output_vocabulary_size = None
 
     def adjust_length(self, length):
-        # Optionally add 1 for BOS.
         return int(self.uses_bos) + length
 
     def get_vocabularies(self, vocabulary_data, builder=None):
         return get_vocabularies(vocabulary_data, self.uses_bos, self.uses_eos, builder)
 
     def prepare_batch(self, batch, device):
-        # When doing language modeling, in some cases, we can use the same
-        # index for padding symbols in both the input and output tensor.
-        # Using the same padding index in the input and output tensors allows
-        # us to allocate one tensor and simply slice it, saving time and
-        # memory.
-        # The EOS symbol will appear as an input symbol, but its embedding
-        # will never receive gradient from the language modeling objective,
-        # because it will only appear in positions where the output is padding,
-        # so it is the same as if padding (or any other index) were given as
-        # input.
-        # For this to work, the padding index needs to be (1) a value unique
-        # from all other indexes used in the output, and (2) a valid index for
-        # the input embedding matrix.
-        # This is possible for transformers, because BOS is always in the input
-        # vocabulary and never in the output vocabulary, so using the size of
-        # the output vocabulary satisfies both of these constraints.
         if self.output_padding_index is not None:
-            # If a language modeling head is used, use the size of the output
-            # vocabulary as the padding index.
             padding_index = self.output_padding_index
         else:
-            # Otherwise, arbitrarily use 0 as the padding index.
             padding_index = 0
+            
         full_tensor, last_index = pad_sequences(
-            [x[0] for x in batch],
-            device,
-            # Note that BOS will be None and not added if the transformer is
-            # not used.
-            bos=self.bos_index,
-            # Note that EOS will be None and not added if neither language
-            # modeling not next set prediction heads are used.
-            eos=self.eos_index,
-            pad=padding_index,
-            return_lengths=True
+            [x[0] for x in batch], device,
+            bos=self.bos_index, eos=self.eos_index,
+            pad=padding_index, return_lengths=True
         )
-        if self.eos_index is not None:
-            # The input contains everything except EOS.
-            input_tensor = full_tensor[:, :-1]
-        else:
-            input_tensor = full_tensor
-        # Create a tensor of classifier labels.
-        recognition_expected_tensor = torch.tensor(
-            [x[1][0] for x in batch],
-            device=device,
-            dtype=torch.float
-        )
-        # If a language modeling or next symbols head is used, compute a mask of positive
-        # examples, which will be used to select the examples to compute the
-        # cross entropy loss on.
+        input_tensor = full_tensor[:, :-1] if self.eos_index is not None else full_tensor
+        
+        recognition_expected_tensor = torch.tensor([x[1][0] for x in batch], device=device, dtype=torch.float)
+        
+        positive_mask = None
+        positive_output_lengths = None
         if self.use_language_modeling_head or self.use_next_symbols_head:
             positive_mask = recognition_expected_tensor.bool()
             positive_output_lengths = last_index[positive_mask] + 1
-        else:
-            positive_mask = None
-            positive_output_lengths = None
-        # Get the tensor to use for computing the language modeling cross
-        # entropy.
+
+        language_modeling_expected_tensor = None
         if self.use_language_modeling_head:
-            if self.uses_bos:
-                language_modeling_expected_tensor = full_tensor[:, 1:]
-            else:
-                language_modeling_expected_tensor = full_tensor
-            # Select only the positive examples.
+            language_modeling_expected_tensor = full_tensor[:, 1:] if self.uses_bos else full_tensor
             language_modeling_expected_tensor = language_modeling_expected_tensor[positive_mask]
-        else:
-            language_modeling_expected_tensor = None
+
+        next_symbols_expected_tensor = None
+        next_symbols_padding_mask = None
         if self.use_next_symbols_head:
             next_symbols_data = [x[1][1] for x in batch if x[1][1] is not None]
             num_positive_examples = len(next_symbols_data)
             max_output_length = full_tensor.size(1) - int(self.uses_bos)
-            # Construct a tensor of multi-hot vectors representing the sets of
-            # valid next symbols.
             next_symbols_expected_tensor = torch.zeros(
-                (num_positive_examples, max_output_length, self.output_vocabulary_size),
-                device=device
+                (num_positive_examples, max_output_length, self.output_vocabulary_size), device=device
             )
-            # Construct a tensor that will be used to mask out outputs
-            # corresponding to padding.
             next_symbols_padding_mask = torch.zeros(
-                (num_positive_examples, max_output_length),
-                device=device
+                (num_positive_examples, max_output_length), device=device
             )
             for i, next_symbol_set_list in enumerate(next_symbols_data):
                 for j, next_symbol_set in enumerate(next_symbol_set_list):
                     next_symbols_expected_tensor[i, j, next_symbol_set] = 1
                 next_symbols_padding_mask[i, :len(next_symbol_set_list)] = 1
-        else:
-            next_symbols_expected_tensor = None
-            next_symbols_padding_mask = None
-        # For RNNs, the input vocabulary does not contain any symbols that are
-        # not in the output, so the size of the vocabulary is not a valid
-        # embedding index. So, for the input tensor, we create a copy and
-        # change the padding index to 0.
-        # TODO Use packed sequences for RNNs?
+        
         if not self.uses_bos and padding_index == self.output_padding_index:
             input_tensor = input_tensor.clone()
             input_tensor[input_tensor == self.output_padding_index] = 0
+            
         return (
             ModelInput(input_tensor, last_index, positive_mask, input_tensor),
             (
@@ -412,14 +359,12 @@ class RecognitionModelInterface(ModelInterface):
         )
 
     def on_before_process_pairs(self, saver, datasets):
-        if saver.kwargs['architecture'] == 'transformer':
+        arch = saver.kwargs.get('architecture')
+        if arch == 'transformer' or (arch == 'hybrid_csg' and saver.kwargs.get('hybrid_base_architecture') == 'transformer'):
             max_length = max(len(x[0]) for dataset in datasets for x in dataset)
             self._preallocate_positional_encodings(saver, self.adjust_length(max_length))
 
     def _preallocate_positional_encodings(self, saver, max_length):
-        # Precompute all of the sinusoidal positional encodings up-front based
-        # on the maximum length that will be required. This should help with
-        # GPU memory fragmentation.
         d_model = saver.kwargs['d_model']
         for module in saver.model.modules():
             if isinstance(module, SinusoidalPositionalEncodingCacher):
@@ -427,89 +372,64 @@ class RecognitionModelInterface(ModelInterface):
                 module.set_allow_reallocation(False)
 
     def get_logits(self, model, model_input):
+        if self.architecture == 'hybrid_csg':
+            return model(
+                model_input.input_sequence,
+                last_index=model_input.last_index,
+                positive_mask=model_input.positive_mask
+            )
+            
+        core_kwargs = {'include_first': not self.uses_bos}
+        core_internal_tag_kwargs = {}
+        if self.add_ngram_head_n > 0:
+            core_internal_tag_kwargs['ngram_head'] = {'input_ids': model_input.input_ids}
+        
+        if core_internal_tag_kwargs:
+            core_kwargs['tag_kwargs'] = core_internal_tag_kwargs
+            
         tag_kwargs = dict(
-            core=dict(
-                include_first=not self.uses_bos
-            ),
+            core=core_kwargs,
             output_heads=dict(
                 last_index=model_input.last_index,
                 positive_mask=model_input.positive_mask
             )
         )
-        if hasattr(model, 'ngram_head'):
-             tag_kwargs['ngram_head'] = {
-                 'input_ids': model_input.input_ids
-             }
+        return model(model_input.input_sequence, tag_kwargs=tag_kwargs)
 
-        return model(
-            model_input.input_sequence,
-            tag_kwargs=tag_kwargs
-        )
-
-@dataclasses.dataclass
-class ModelInput:
-    input_sequence: torch.Tensor
-    last_index: torch.Tensor
-    positive_mask: Optional[torch.Tensor]
-    input_ids: torch.Tensor
 
 class OutputHeads(torch.nn.Module):
-
-    def __init__(self,
-        input_size: int,
-        use_language_modeling_head: bool,
-        use_next_symbols_head: bool,
-        vocabulary_size: int,
-        shared_embeddings: torch.Tensor
-    ):
+    def __init__(self, input_size: int, use_language_modeling_head: bool, use_next_symbols_head: bool, vocabulary_size: int, shared_embeddings: torch.Tensor):
         super().__init__()
         self.recognition_head = Layer(input_size, 1, bias=True)
+        self.language_modeling_head = None
         if use_language_modeling_head:
             self.language_modeling_head = OutputUnidirectional(
-                input_size=input_size,
-                vocabulary_size=vocabulary_size,
-                shared_embeddings=shared_embeddings,
-                bias=False
+                input_size=input_size, vocabulary_size=vocabulary_size,
+                shared_embeddings=shared_embeddings, bias=False
             )
-        else:
-            self.language_modeling_head = None
+        self.next_symbols_head = None
         if use_next_symbols_head:
-            # TODO Should we tie embeddings here?
             self.next_symbols_head = OutputUnidirectional(
-                input_size=input_size,
-                vocabulary_size=vocabulary_size,
-                bias=True
+                input_size=input_size, vocabulary_size=vocabulary_size, bias=True
             )
-        else:
-            self.next_symbols_head = None
 
     def forward(self, inputs, last_index, positive_mask):
-        # inputs : batch_size x sequence_length x hidden_size
-        # Use some gather wizardry to look up the last elements.
-        # last_inputs[b, h] = inputs[b, last_index[b], h]
         last_inputs = torch.gather(
-            inputs,
-            1,
+            inputs, 1,
             last_index[:, None, None].expand(-1, -1, inputs.size(2))
         ).squeeze(1)
         recognition_logit = self.recognition_head(last_inputs).squeeze(1)
+        
+        language_modeling_logits = None
+        next_symbols_logits = None
+        
         if self.language_modeling_head is not None or self.next_symbols_head is not None:
-            # For language modeling and next symbol prediction, select only the
-            # positive examples in the batch. Do not compute logits for the
-            # negative examples.
             positive_inputs = inputs[positive_mask]
+        
         if self.language_modeling_head is not None:
-            language_modeling_logits = self.language_modeling_head(
-                positive_inputs,
-                include_first=False
-            )
-        else:
-            language_modeling_logits = None
+            language_modeling_logits = self.language_modeling_head(positive_inputs, include_first=False)
+        
         if self.next_symbols_head is not None:
-            next_symbols_logits = self.next_symbols_head(
-                positive_inputs,
-                include_first=False
-            )
-        else:
-            next_symbols_logits = None
+            next_symbols_logits = self.next_symbols_head(positive_inputs, include_first=False)
+            
         return recognition_logit, language_modeling_logits, next_symbols_logits

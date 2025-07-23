@@ -11,7 +11,7 @@ from rau.tasks.common.training_loop import MicroAveragedScoreAccumulator
 
 from recognizers.tools.jsonl import write_json_line
 from recognizers.neural_networks.data import load_prepared_data_from_directory
-from recognizers.neural_networks.model_interface_original import RecognitionModelInterface
+from recognizers.neural_networks.model_interface import RecognitionModelInterface
 from recognizers.neural_networks.training_loop import generate_batches, get_loss_terms
 
 def evaluate(model, model_interface, batches, num_examples):

@@ -80,7 +80,7 @@ def collect_results(base_models_dir):
 
 def main():
     base_models_directory = "data/models"
-    mean_output_csv_path = "results/eval_results_mean_summary_ngram.csv"
+    mean_output_csv_path = "results/eval_results_mean_summary_lba_150steps_size32.csv"
     
     df_results = collect_results(base_models_directory)
 

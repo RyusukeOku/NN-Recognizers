@@ -1,0 +1,3 @@
+language,architecture,loss_terms,validation_set,train_accuracy,train_loss,test_accuracy,test_loss,num_trials
+parity,transformer,rec,validation-long,0.6382,0.5690469979492557,0.5269660678642715,0.7137038554352959,10
+parity,transformer,rec,validation-short,0.61361,0.5967400230769814,0.533313373253493,0.6865518712327223,10

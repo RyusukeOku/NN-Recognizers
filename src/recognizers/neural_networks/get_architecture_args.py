@@ -7,10 +7,18 @@ from recognizers.neural_networks.data import load_vocabulary_data
 def main():
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--architecture', choices=['transformer', 'rnn', 'lstm'], required=True)
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser.add_argument('--architecture', choices=['transformer', 'rnn', 'lstm', 'hybrid_csg'], required=True)
     parser.add_argument('--parameter-budget', type=int, required=True)
     parser.add_argument('--training-data', type=pathlib.Path, required=True)
-    args = parser.parse_args()
+    parser.add_argument(
+        '--add-ngram-head-n',
+        type=int,
+        default=0,
+        help='(Optional) If greater than 0, add an n-gram head of size n to the model.'
+    )
+
+    args, other_args = parser.parse_known_args()
 
     vocab = load_vocabulary_data(args, parser)
     vocab_size = len(vocab.tokens) + int(vocab.allow_unk)
@@ -81,6 +89,9 @@ def main():
         raise NotImplementedError
     outputs.extend(['--dropout', '0.1'])
     print(' '.join(outputs))
+    if args.add_ngram_head_n > 0:
+        print(f'--add-ngram-head-n {args.add_ngram_head_n}')
+    print(' '.join(other_args))
 
 if __name__ == '__main__':
     main()
