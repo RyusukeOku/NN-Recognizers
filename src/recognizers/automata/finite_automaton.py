@@ -11,6 +11,9 @@ from .automaton import (
 )
 from .semiring import Semiring
 
+from rayuela.fsa.fsa import FSA
+from rayuela.base.semiring import Tropical
+
 Weight = TypeVar('Weight')
 
 class FiniteAutomatonTransition(Transition):
@@ -46,6 +49,30 @@ class FiniteAutomatonContainer(FiniteAutomaton, AutomatonContainer):
 
     def add_accept_state(self, state: State) -> None:
         self._accept_states[state] = None
+
+    def to_rayuela_fsa(self, alphabet: list[str]) -> FSA:
+        """
+        Converts this automaton to a Rayuela FSA object.
+        Args:
+            alphabet: A list of strings representing the alphabet, where the
+                      index corresponds to the symbol ID.
+        Returns:
+            A Rayuela FSA object.
+        """
+        fsa = FSA(R=Tropical)
+        for i in range(self.num_states()):
+            fsa.add_state(i)
+        fsa.set_I(self.initial_state())
+        for state in range(self.num_states()):
+            if self.is_accept_state(state):
+                fsa.add_F(state)
+        for transition in self.transitions():
+            source_state = transition.state_from
+            label_index = transition.symbol
+            next_state = transition.state_to
+            token = alphabet[label_index]
+            fsa.add_arc(source_state, token, next_state, Tropical(0.0))
+        return fsa
 
 class WeightedFiniteAutomaton(FiniteAutomaton, WeightedAutomaton[Weight]):
 

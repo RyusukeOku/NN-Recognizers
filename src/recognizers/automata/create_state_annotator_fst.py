@@ -1,4 +1,3 @@
-
 import argparse
 import sys
 import torch
@@ -8,32 +7,13 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from recognizers.automata.finite_automaton import FiniteAutomatonContainer
-from rayuela.fsa.fsa import FSA
+from rayuela.fsa.fst import FST
 from rayuela.base.semiring import Tropical
-
-def convert_pt_to_fsa(automaton_container: FiniteAutomatonContainer, alphabet: list[str]) -> FSA:
-    """
-    Converts a FiniteAutomatonContainer object (from automaton.pt) into a Rayuela FSA object.
-    """
-    fsa = FSA(R=Tropical)
-    for i in range(automaton_container.num_states()):
-        fsa.add_state(i)
-    fsa.set_I(automaton_container.initial_state())
-    for state in range(automaton_container.num_states()):
-        if automaton_container.is_accept_state(state):
-            fsa.add_F(state)
-    for transition in automaton_container.transitions():
-        source_state = transition.state_from
-        label_index = transition.symbol
-        next_state = transition.state_to
-        token = alphabet[label_index]
-        fsa.add_arc(source_state, token, next_state, Tropical(0.0))
-    return fsa
 
 def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str):
     """
-    Reads an automaton.pt file, converts it to a Rayuela FSA, and then creates
-    a serializable dictionary of the state-annotating FST data.
+    Reads an automaton.pt file, converts it to a Rayuela FSA using the
+    built-in method, and saves the state-annotating FST data.
     """
     try:
         data = torch.load(pt_path, weights_only=False)
@@ -46,13 +26,13 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str):
         print(f"Error: The file {pt_path} does not have the expected format. Details: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # Convert to Rayuela FSA using the object's own method
     print("Converting .pt automaton to Rayuela FSA...")
-    fsa = convert_pt_to_fsa(automaton_container, alphabet)
+    fsa = automaton_container.to_rayuela_fsa(alphabet)
     print("Conversion successful.")
 
+    # Build the serializable data dictionary for the annotator FST
     print("Extracting data to build FST...")
-    
-    # Extract FST components into basic Python types
     states = list(fsa.Q)
     initial_state = next(fsa.I, None)
     final_states = list(fsa.F)
@@ -62,13 +42,12 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str):
             output_label = f"{i}_{p}"
             arcs.append((p, i, output_label, q, w.value))
 
-    # Store everything in a dictionary
     fst_data = {
         'states': states,
         'initial_state': initial_state,
         'final_states': final_states,
         'arcs': arcs,
-        'semiring_type': 'tropical' # Add semiring type for reconstruction
+        'semiring_type': 'tropical'
     }
 
     torch.save(fst_data, fst_path)
@@ -78,16 +57,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="Create a state annotator FST from a project-specific automaton.pt file."
     )
-    parser.add_argument(
-        "automaton_pt_path",
-        type=str,
-        help="Path to the input automaton.pt file."
-    )
-    parser.add_argument(
-        "output_fst_path",
-        type=str,
-        help="Path to save the output FST data file."
-    )
+    parser.add_argument("automaton_pt_path", type=str, help="Path to the input automaton.pt file.")
+    parser.add_argument("output_fst_path", type=str, help="Path to save the output FST data file.")
     args = parser.parse_args()
-
     create_state_annotator_fst_from_pt(args.automaton_pt_path, args.output_fst_path)
