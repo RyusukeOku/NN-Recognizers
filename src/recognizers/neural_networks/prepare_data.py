@@ -42,7 +42,7 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
         fst.set_I(fst_data['initial_state'])
     
     for final_state in fst_data['final_states']:
-        fst.add_F(final_state)
+        fst.add_F(final_state, semiring(0.0))
     
     for p, i, o, q, w_val in fst_data['arcs']:
         fst.add_arc(p, i, o, q, semiring(w_val))
@@ -79,7 +79,7 @@ def prepare_annotated_file(vocab, annotator_fst, pair):
     input_path, output_path = pair
     print(f'preparing annotated tokens in {input_path} => {output_path}', file=sys.stderr)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with input_path.open() as fin, torch.serialization.open_file(str(output_path), 'w') as fout:
+    with input_path.open() as fin:
         data = []
         for line in fin:
             tokens = line.strip().split()
@@ -88,7 +88,7 @@ def prepare_annotated_file(vocab, annotator_fst, pair):
                 data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
             except KeyError as e:
                 raise ValueError(f'{input_path}: unknown token: {e}')
-        torch.save(data, fout)
+        torch.save(data, output_path)
 
 # --- Original Functions (from project) ---
 
@@ -181,7 +181,7 @@ def main():
     annotator = None
     if args.use_state_annotations:
         print("Loading and reconstructing FST annotator...")
-        fst_data = torch.load(args.fst_annotator_path)
+        fst_data = torch.load(args.fst_annotator_path, weights_only=False)
         annotator = reconstruct_fst_from_data(fst_data)
         print("FST annotator ready.")
 
