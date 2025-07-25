@@ -13,6 +13,59 @@ from rau.tasks.common.data_preparation import (
 )
 from rau.tasks.language_modeling.vocabulary import build_softmax_vocab
 from rau.vocab import ToIntVocabularyBuilder, ToStringVocabularyBuilder
+from rayuela.fsa.fsa import FSA
+from rayuela.fsa.fst import FST
+from rayuela.base.semiring import Tropical
+
+
+def annotate_string(input_string: str, annotator_fst: FST) -> list[str]:
+    """Annotates a single string with the FST."""
+    tokens = input_string.strip().split()
+    if not tokens:
+        return []
+
+    input_fsa = FSA.from_string(tokens)
+    try:
+        composed_fst = annotator_fst.compose(input_fsa)
+        best_path = composed_fst.shortest_path(semiring=Tropical)
+        if best_path is None:
+            return tokens  # Fallback to original tokens
+        return best_path.output_string
+    except Exception:
+        # Fallback for strings not in the FST's language
+        return tokens
+
+def annotate_and_get_token_types(path, unk_string, annotator_fst):
+    """
+    Reads tokens from a file, annotates them using the FST, and returns the set of unique annotated tokens.
+    """
+    def generate_annotated_tokens():
+        with path.open() as fin:
+            for line in fin:
+                annotated_tokens = annotate_string(line, annotator_fst)
+                for token in annotated_tokens:
+                    yield token
+
+    return get_token_types(generate_annotated_tokens(), unk_string)
+
+
+def prepare_annotated_file(vocab, annotator_fst, pair):
+    """
+    Annotates each string in the input file using the FST and converts it to integer IDs using the vocabulary.
+    """
+    input_path, output_path = pair
+    print(f'preparing annotated tokens in {input_path} => {output_path}', file=sys.stderr)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with input_path.open() as fin, torch.serialization.open_file(str(output_path), 'w') as fout:
+        data = []
+        for line in fin:
+            annotated_tokens = annotate_string(line, annotator_fst)
+            try:
+                data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
+            except KeyError as e:
+                raise ValueError(f'{input_path}: unknown token: {e}')
+        torch.save(data, fout)
+
 
 def get_positional_token_types_in_file(path, unk_string):
     """
@@ -154,6 +207,10 @@ def main():
     parser.add_argument('--only-more-data', action='store_true', default=False,
         help='Do not write the output files for the training data and '
              'vocabulary. Only process the additional datasets.')
+    parser.add_argument('--use-state-annotations', action='store_true', default=False,
+                        help='Annotate input strings with FST states.')
+    parser.add_argument('--fst-annotator-path', type=pathlib.Path,
+                        help='Path to the FST for annotation. Required if --use-state-annotations is set.')
     add_prepare_data_args(parser)
     args = parser.parse_args()
     validate_prepare_data_args(parser, args)
@@ -178,12 +235,23 @@ def main():
 
     unk_string = None if args.never_allow_unk else args.unk_string
 
+    if args.use_state_annotations:
+        if not args.fst_annotator_path:
+            parser.error("--fst-annotator-path is required when using --use-state-annotations")
+        annotator_fst = FST.read(args.fst_annotator_path)
+
     if args.use_next_symbols:
         # If we use next symbols data, build the vocabulary from that data,
         # as there can be more symbols than in the strings data.
         token_types, has_unk = get_token_types_in_next_symbols_file(
             training_files[2][0],
             unk_string
+        )
+    elif args.use_state_annotations:
+        token_types, has_unk = annotate_and_get_token_types(
+            training_files[0][0],
+            unk_string,
+            annotator_fst
         )
     else:
         token_types, has_unk = get_token_types_in_file(
@@ -210,7 +278,10 @@ def main():
             'allow_unk' : allow_unk
         }, vocab_output_file)
     for strings_files, labels_files, next_symbols_files in prepared_files:
-        prepare_file(vocab, strings_files)
+        if args.use_state_annotations:
+            prepare_annotated_file(vocab, annotator_fst, strings_files)
+        else:
+            prepare_file(vocab, strings_files)
         prepare_labels_file(labels_files)
         if args.use_next_symbols:
             prepare_valid_symbols_file(vocab, eos_index, next_symbols_files)
