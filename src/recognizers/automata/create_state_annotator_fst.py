@@ -1,3 +1,4 @@
+
 import argparse
 import sys
 import torch
@@ -10,7 +11,7 @@ from recognizers.automata.finite_automaton import FiniteAutomatonContainer
 from rayuela.fsa.fst import FST
 from rayuela.base.semiring import Tropical
 
-def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str):
+def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alphabet: list[str] | None = None):
     """
     Reads an automaton.pt file, converts it to a Rayuela FSA using the
     built-in method, and saves the state-annotating FST data.
@@ -18,7 +19,17 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str):
     try:
         data = torch.load(pt_path, weights_only=False)
         automaton_container = data['automaton']
-        alphabet = data['alphabet']
+        
+        # Determine alphabet
+        if 'alphabet' in data:
+            alphabet = data['alphabet']
+            print("Alphabet found in .pt file.")
+        elif explicit_alphabet:
+            alphabet = explicit_alphabet
+            print(f"Using explicit alphabet: {alphabet}")
+        else:
+            raise ValueError("Alphabet not found in .pt file and not provided via --alphabet argument.")
+
     except FileNotFoundError:
         print(f"Error: Automaton file not found at {pt_path}", file=sys.stderr)
         sys.exit(1)
@@ -59,5 +70,15 @@ if __name__ == '__main__':
     )
     parser.add_argument("automaton_pt_path", type=str, help="Path to the input automaton.pt file.")
     parser.add_argument("output_fst_path", type=str, help="Path to save the output FST data file.")
+    parser.add_argument(
+        "--alphabet",
+        type=str,
+        help="Comma-separated string of alphabet symbols (e.g., '0,1,a,b'). Required if alphabet is not in .pt file."
+    )
     args = parser.parse_args()
-    create_state_annotator_fst_from_pt(args.automaton_pt_path, args.output_fst_path)
+
+    explicit_alphabet_list = None
+    if args.alphabet:
+        explicit_alphabet_list = args.alphabet.split(',')
+
+    create_state_annotator_fst_from_pt(args.automaton_pt_path, args.output_fst_path, explicit_alphabet_list)

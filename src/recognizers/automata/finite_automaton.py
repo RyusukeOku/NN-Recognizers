@@ -65,7 +65,7 @@ class FiniteAutomatonContainer(FiniteAutomaton, AutomatonContainer):
         fsa.set_I(self.initial_state())
         for state in range(self.num_states()):
             if self.is_accept_state(state):
-                fsa.add_F(state)
+                fsa.add_F(state, Tropical(0.0))
         for transition in self.transitions():
             source_state = transition.state_from
             label_index = transition.symbol
