@@ -54,7 +54,16 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     if not tokens:
         return []
     
-    input_fsa = FSA.from_string(tokens, R=annotator_fst.R)
+    # Manually construct a linear FSA from the input tokens
+    input_fsa = FSA(R=annotator_fst.R)
+    num_states = len(tokens) + 1
+    for i in range(num_states):
+        input_fsa.add_state(i)
+    input_fsa.set_I(0)
+    input_fsa.add_F(num_states - 1, annotator_fst.R(0.0)) # Add final state with appropriate weight
+
+    for i, token in enumerate(tokens):
+        input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
     
     try:
         composed_fst = annotator_fst.compose(input_fsa)
