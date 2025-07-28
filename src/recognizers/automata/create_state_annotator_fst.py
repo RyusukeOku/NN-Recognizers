@@ -51,6 +51,9 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alp
     for p in states:
         for i, q, w in fsa.arcs(p):
             output_label = f"{i}_{p}"
+            # Check if the next state (q) is a final state
+            if q in final_states:
+                output_label = f"{output_label}_F"
             arcs.append((p, i, output_label, q, w.value))
 
     fst_data = {
