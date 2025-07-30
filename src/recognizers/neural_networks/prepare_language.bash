@@ -20,6 +20,11 @@ Prepare the datasets for a language.
 base_dir=${1-}
 language=${2-}
 
+if ! shift 2; then
+  usage >&2
+  exit 1
+fi
+
 # Parse optional arguments
 annotation_flags=()
 while [[ $# -gt 0 ]]; do
@@ -36,15 +41,12 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      break # End of optional arguments
+      echo "Unknown optional argument: $1" >&2
+      usage >&2
+      exit 1
       ;;
   esac
 done
-
-if ! shift 2; then
-  usage >&2
-  exit 1
-fi
 
 language_dir=$(get_language_dir "$base_dir" "$language")
 
