@@ -34,6 +34,7 @@ class ModelInput:
     last_index: torch.Tensor
     positive_mask: Optional[torch.Tensor]
     input_ids: torch.Tensor
+    fsa_state_ids: Optional[torch.Tensor] = None
 
 class HybridCSGModel(nn.Module):
     """
@@ -120,7 +121,12 @@ class RecognitionModelInterface(ModelInterface):
         group.add_argument('--embedding-size', type=int, help='(hybrid_csg) Embedding size.')
         group.add_argument('--lba-hidden-size', type=int, default=40, help='(hybrid_csg) Hidden size for NeuralLBA.')
         group.add_argument('--lba-n-steps', type=int, default=100, help='(hybrid_csg) Number of steps for NeuralLBA.')
-
+        group.add_argument('--use-fsa-state-embedding', action='store_true', default=False,
+            help='Use FSA state embedding as additional input.')
+        group.add_argument('--fsa-state-embedding-size', type=int, default=16,
+            help='The size of the FSA state embedding.')
+        group.add_argument('--fsa-num-states', type=int, default=100, # Default, should be dynamically set
+            help='Number of states in the FSA for the embedding layer.')
 
     def get_kwargs(self, args, vocabulary_data):
         uses_bos = args.architecture == 'transformer' or (args.architecture == 'hybrid_csg' and args.hybrid_base_architecture == 'transformer')
@@ -147,6 +153,9 @@ class RecognitionModelInterface(ModelInterface):
             hidden_units=args.hidden_units,
             use_language_modeling_head=args.use_language_modeling_head,
             use_next_symbols_head=args.use_next_symbols_head,
+            use_fsa_state_embedding=args.use_fsa_state_embedding,
+            fsa_state_embedding_size=args.fsa_state_embedding_size,
+            fsa_num_states=args.fsa_num_states,
             input_vocabulary_size=len(input_vocab),
             output_vocabulary_size=len(output_vocab) if uses_output_vocab else None,
             bos_index=input_vocab.bos_index if uses_bos else None,
@@ -199,10 +208,18 @@ class RecognitionModelInterface(ModelInterface):
             device=self.get_device(None)
         )
 
-    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, **kwargs):
+    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, use_fsa_state_embedding, fsa_state_embedding_size, fsa_num_states, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, **kwargs):
         core_pipeline = None
         output_size = 0
         shared_embeddings = None
+
+        token_embedding_size = d_model if architecture == 'transformer' else hidden_units
+        input_embedding_size = token_embedding_size
+        if use_fsa_state_embedding:
+            input_embedding_size += fsa_state_embedding_size
+
+        if use_fsa_state_embedding:
+            self.fsa_state_embedding = nn.Embedding(fsa_num_states, fsa_state_embedding_size)
 
         if architecture == 'transformer':
             if num_layers is None or d_model is None or num_heads is None or feedforward_size is None or dropout is None:
@@ -210,27 +227,27 @@ class RecognitionModelInterface(ModelInterface):
             
             shared_embeddings = get_shared_embeddings(
                 tie_embeddings=use_language_modeling_head, input_vocabulary_size=input_vocabulary_size,
-                output_vocabulary_size=output_vocabulary_size, embedding_size=d_model, use_padding=False
+                output_vocabulary_size=output_vocabulary_size, embedding_size=token_embedding_size, use_padding=False
             )
             if positional_encoding == 'resettable':
                 input_layer = ResettablePositionalInputLayer(
-                    vocabulary_size=input_vocabulary_size, d_model=d_model, reset_symbols=reset_symbol_ids,
+                    vocabulary_size=input_vocabulary_size, d_model=token_embedding_size, reset_symbols=reset_symbol_ids,
                     dropout=dropout, use_padding=False, shared_embeddings=shared_embeddings
                 )
             else:
                 input_layer = get_transformer_input_unidirectional(
-                    vocabulary_size=input_vocabulary_size, d_model=d_model, dropout=dropout,
+                    vocabulary_size=input_vocabulary_size, d_model=token_embedding_size, dropout=dropout,
                     use_padding=False, shared_embeddings=shared_embeddings
                 )
             
             core_pipeline = (
                 input_layer @
                 UnidirectionalTransformerEncoderLayers(
-                    num_layers=num_layers, d_model=d_model, num_heads=num_heads,
+                    num_layers=num_layers, d_model=input_embedding_size, num_heads=num_heads,
                     feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
                 ).main()
             )
-            output_size = d_model
+            output_size = input_embedding_size
 
         elif architecture in ('rnn', 'lstm'):
             if hidden_units is None or num_layers is None or dropout is None:
@@ -238,13 +255,13 @@ class RecognitionModelInterface(ModelInterface):
 
             shared_embeddings = get_shared_embeddings(
                 tie_embeddings=use_language_modeling_head, input_vocabulary_size=input_vocabulary_size,
-                output_vocabulary_size=output_vocabulary_size, embedding_size=hidden_units, use_padding=False
+                output_vocabulary_size=output_vocabulary_size, embedding_size=token_embedding_size, use_padding=False
             )
             RecurrentModel = SimpleRNN if architecture == 'rnn' else LSTM
-            core = RecurrentModel(input_size=hidden_units, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
+            core = RecurrentModel(input_size=input_embedding_size, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
             core_pipeline = (
                 EmbeddingUnidirectional(
-                    vocabulary_size=input_vocabulary_size, output_size=hidden_units,
+                    vocabulary_size=input_vocabulary_size, output_size=token_embedding_size,
                     use_padding=False, shared_embeddings=shared_embeddings
                 ) @
                 DropoutUnidirectional(dropout) @
@@ -284,6 +301,7 @@ class RecognitionModelInterface(ModelInterface):
         self.use_next_symbols_head = saver.kwargs['use_next_symbols_head']
         self.add_ngram_head_n = saver.kwargs.get('add_ngram_head_n', 0)
         self.architecture = saver.kwargs.get('architecture')
+        self.use_fsa_state_embedding = saver.kwargs.get('use_fsa_state_embedding', False)
 
         if self.use_language_modeling_head:
             self.output_padding_index = saver.kwargs['output_vocabulary_size']
@@ -313,6 +331,13 @@ class RecognitionModelInterface(ModelInterface):
         )
         input_tensor = full_tensor[:, :-1] if self.eos_index is not None else full_tensor
         
+        fsa_state_ids_tensor = None
+        if self.use_fsa_state_embedding:
+            fsa_state_ids_list = [x[2] for x in batch]
+            fsa_state_ids_tensor, _ = pad_sequences(
+                fsa_state_ids_list, device, pad=0, return_lengths=False
+            )
+
         recognition_expected_tensor = torch.tensor([x[1][0] for x in batch], device=device, dtype=torch.float)
         
         positive_mask = None
@@ -348,7 +373,7 @@ class RecognitionModelInterface(ModelInterface):
             input_tensor[input_tensor == self.output_padding_index] = 0
             
         return (
-            ModelInput(input_tensor, last_index, positive_mask, input_tensor),
+            ModelInput(input_tensor, last_index, positive_mask, input_tensor, fsa_state_ids_tensor),
             (
                 recognition_expected_tensor,
                 language_modeling_expected_tensor,
@@ -386,7 +411,18 @@ class RecognitionModelInterface(ModelInterface):
         
         if core_internal_tag_kwargs:
             core_kwargs['tag_kwargs'] = core_internal_tag_kwargs
-            
+
+        input_sequence = model_input.input_sequence
+        if self.use_fsa_state_embedding:
+            token_embeddings = model.core.layers[0](input_sequence)
+            state_embeddings = self.fsa_state_embedding(model_input.fsa_state_ids)
+            input_sequence = torch.cat([token_embeddings, state_embeddings], dim=-1)
+            # The rest of the pipeline now gets the combined embedding
+            # We need to skip the first embedding layer in the core pipeline
+            core_output = model.core.layers[1:](input_sequence, tag_kwargs=core_internal_tag_kwargs)
+        else:
+            core_output = model.core(input_sequence, tag_kwargs=core_kwargs)
+
         tag_kwargs = dict(
             core=core_kwargs,
             output_heads=dict(
@@ -394,7 +430,10 @@ class RecognitionModelInterface(ModelInterface):
                 positive_mask=model_input.positive_mask
             )
         )
-        return model(model_input.input_sequence, tag_kwargs=tag_kwargs)
+        if self.use_fsa_state_embedding:
+            return model.output_heads(core_output, last_index=model_input.last_index, positive_mask=model_input.positive_mask)
+        else:
+            return model(model_input.input_sequence, tag_kwargs=tag_kwargs)
 
 
 class OutputHeads(torch.nn.Module):

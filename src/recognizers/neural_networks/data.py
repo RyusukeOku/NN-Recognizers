@@ -40,7 +40,15 @@ def load_prepared_data_from_directory(directory, model_interface):
         )
     else:
         next_symbols_data = itertools.repeat(None, len(labels_data))
-    return list(zip(strings_data, zip(labels_data, next_symbols_data, strict=True), strict=True))
+
+    if getattr(model_interface, 'use_fsa_state_embedding', False):
+        states_data = load_prepared_states_file(directory / 'states.prepared')
+        return list(zip(strings_data, zip(labels_data, next_symbols_data, strict=True), states_data, strict=True))
+    else:
+        return list(zip(strings_data, zip(labels_data, next_symbols_data, strict=True), strict=True))
+
+def load_prepared_states_file(path: pathlib.Path) -> list[torch.Tensor]:
+    return torch.load(path, weights_only=False)
 
 def load_prepared_labels_file(path: pathlib.Path) -> list[bool]:
     return torch.load(path, weights_only=False)

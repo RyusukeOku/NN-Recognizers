@@ -17,6 +17,12 @@ def main():
         default=0,
         help='(Optional) If greater than 0, add an n-gram head of size n to the model.'
     )
+    parser.add_argument('--use-fsa-state-embedding', action='store_true', default=False,
+                        help='Use FSA state embedding as additional input.')
+    parser.add_argument('--fsa-state-embedding-size', type=int, default=16,
+                        help='The size of the FSA state embedding.')
+    parser.add_argument('--fsa-num-states', type=int, default=100, # Default, should be dynamically set
+                        help='Number of states in the FSA for the embedding layer.')
 
     args, other_args = parser.parse_known_args()
 
@@ -28,6 +34,17 @@ def main():
         '--architecture', args.architecture,
         '--num-layers', str(num_layers)
     ]
+    
+    fsa_embedding_params = 0
+    if args.use_fsa_state_embedding:
+        fsa_embedding_params = args.fsa_num_states * args.fsa_state_embedding_size
+        outputs.extend([
+            '--use-fsa-state-embedding',
+            '--fsa-state-embedding-size', str(args.fsa_state_embedding_size),
+            '--fsa-num-states', str(args.fsa_num_states)
+        ])
+
+    parameter_budget = args.parameter_budget - fsa_embedding_params
 
     if args.architecture == 'transformer':
         # num_params =
@@ -45,7 +62,7 @@ def main():
         feedforward_size_factor = 4
         a = num_layers * (4 + 2 * feedforward_size_factor)
         b = vocab_size + num_layers * (8 + 2 * feedforward_size_factor) + 3
-        c = 1 - args.parameter_budget
+        c = 1 - parameter_budget
         d_model_float = (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
         size_float = d_model_float / num_heads
         size = round(size_float)
@@ -79,7 +96,7 @@ def main():
         else:
             a = 8 * num_layers
             b = vocab_size + 5 * num_layers + 1
-        c = 1 - args.parameter_budget
+        c = 1 - parameter_budget
         hidden_units_float = (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
         hidden_units = round(hidden_units_float)
         outputs.extend([

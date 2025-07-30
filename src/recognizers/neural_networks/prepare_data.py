@@ -49,28 +49,58 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
         
     return fst
 
-def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
-    """Annotates a list of tokens using the provided FST."""
+def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tuple[list[str], list[int]]:
+    """Annotates a list of tokens using the provided FST and returns state IDs."""
     if not tokens:
-        return []
-    
+        return [], []
+
     # Manually construct a linear FSA from the input tokens
     input_fsa = FSA(R=annotator_fst.R)
     num_states = len(tokens) + 1
     for i in range(num_states):
         input_fsa.add_state(i)
     input_fsa.set_I(0)
-    input_fsa.add_F(num_states - 1, annotator_fst.R(0.0)) # Add final state with appropriate weight
+    input_fsa.add_F(num_states - 1, annotator_fst.R(0.0))
 
     for i, token in enumerate(tokens):
         input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
-    
+
     try:
         composed_fst = annotator_fst.compose(input_fsa)
         best_path = composed_fst.shortest_path()
-        return best_path.output_string if best_path else tokens
+        if not best_path or not best_path.I:
+            # Fallback if no path is found
+            return tokens, [annotator_fst.I] * len(tokens)
+
+        # Traverse the best path to extract annotated tokens and state IDs
+        annotated_tokens = []
+        state_ids = []
+        
+        # The states in the composed FST are tuples: (state_from_annotator, state_from_input)
+        # We start from the initial state of the best path.
+        current_state = best_path.I
+        
+        # Create a map from source state to arc for easy traversal
+        # Since it's a single path, each state (except the final one) has one outgoing arc.
+        arc_map = {arc.source: arc for arc in best_path.arcs}
+
+        while current_state in arc_map:
+            arc = arc_map[current_state]
+            annotated_tokens.append(arc.olabel)
+            # The destination state of the arc is a tuple, we want the first element.
+            state_ids.append(arc.dest[0])
+            current_state = arc.dest
+        
+        # Ensure the lengths match, otherwise something is wrong.
+        if len(state_ids) != len(tokens):
+             return tokens, [annotator_fst.I] * len(tokens)
+
+        return annotated_tokens, state_ids
+
     except Exception:
-        return tokens # Fallback to original tokens on error
+        # Fallback in case of any error during composition or pathfinding
+        return tokens, [annotator_fst.I] * len(tokens)
+
 
 def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
     """Reads tokens, annotates them, and returns the set of unique annotated tokens."""
@@ -78,26 +108,36 @@ def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
         with path.open() as fin:
             for line in fin:
                 tokens = line.strip().split()
-                annotated_tokens = annotate_string(tokens, annotator_fst)
+                annotated_tokens, _ = annotate_string_and_get_states(tokens, annotator_fst)
                 for token in annotated_tokens:
                     yield token
     return get_token_types(generate_annotated_tokens(), unk_string)
 
-def prepare_annotated_file(vocab, annotator_fst, pair):
-    """Annotates strings in a file and saves them as integerized tensors."""
-    input_path, output_path = pair
+def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states_pair):
+    """Annotates strings in a file and saves them and their state IDs as integerized tensors."""
+    input_path, output_path = strings_pair
+    states_output_path = states_pair[1]
+    
     print(f'preparing annotated tokens in {input_path} => {output_path}', file=sys.stderr)
+    print(f'preparing states in {input_path} => {states_output_path}', file=sys.stderr)
+    
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    states_output_path.parent.mkdir(parents=True, exist_ok=True)
+
     with input_path.open() as fin:
-        data = []
+        tokens_data = []
+        states_data = []
         for line in fin:
             tokens = line.strip().split()
-            annotated_tokens = annotate_string(tokens, annotator_fst)
+            annotated_tokens, state_ids = annotate_string_and_get_states(tokens, annotator_fst)
             try:
-                data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
+                tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
+                # Assuming state IDs are already integers
+                states_data.append(torch.tensor(state_ids, dtype=torch.long))
             except KeyError as e:
                 raise ValueError(f'{input_path}: unknown token: {e}')
-        torch.save(data, output_path)
+        torch.save(tokens_data, output_path)
+        torch.save(states_data, states_output_path)
 
 # --- Original Functions (from project) ---
 
@@ -114,15 +154,22 @@ def get_token_types_in_next_symbols_file(path, unk_string):
             unk_string
         )
 
-def get_file_names_from_directory(directory, use_next_symbols):
+def get_file_names_from_directory(directory, use_next_symbols, use_state_annotations):
     if use_next_symbols:
         next_symbols_files = (directory / 'next-symbols.jsonl', directory / 'next-symbols.prepared')
     else:
         next_symbols_files = None
+    
+    if use_state_annotations:
+        states_files = (None, directory / 'states.prepared') # No source for states
+    else:
+        states_files = None
+
     return (
         (directory / 'main.tok', directory / 'main.prepared'),
         (directory / 'labels.txt', directory / 'labels.prepared'),
-        next_symbols_files
+        next_symbols_files,
+        states_files
     )
 
 def prepare_labels_file(pair):
@@ -194,12 +241,12 @@ def main():
         annotator = reconstruct_fst_from_data(fst_data)
         print("FST annotator ready.")
 
-    training_files = get_file_names_from_directory(args.training_data, args.use_next_symbols)
+    training_files = get_file_names_from_directory(args.training_data, args.use_next_symbols, args.use_state_annotations)
     prepared_files = []
     if not args.only_more_data:
         prepared_files.append(training_files)
     for arg in args.more_data:
-        prepared_files.append(get_file_names_from_directory(args.training_data / 'datasets' / arg, args.use_next_symbols))
+        prepared_files.append(get_file_names_from_directory(args.training_data / 'datasets' / arg, args.use_next_symbols, args.use_state_annotations))
 
     unk_string = None if args.never_allow_unk else args.unk_string
 
@@ -226,9 +273,9 @@ def main():
         torch.save({'tokens': tokens, 'allow_unk': allow_unk}, vocab_output_file)
 
     # Prepare all specified datasets
-    for strings_files, labels_files, next_symbols_files in prepared_files:
+    for strings_files, labels_files, next_symbols_files, states_files in prepared_files:
         if annotator:
-            prepare_annotated_file(vocab, annotator, strings_files)
+            prepare_annotated_file_and_states(vocab, annotator, strings_files, states_files)
         else:
             prepare_file(vocab, strings_files)
         
