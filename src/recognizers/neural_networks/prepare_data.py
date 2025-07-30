@@ -1,5 +1,3 @@
-
-
 import argparse
 import json
 import pathlib
@@ -85,12 +83,7 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
             annotated_tokens.append(arc.olabel)
             
             state_from_annotator = arc.dest.state1
-            
-            if isinstance(state_from_annotator, State):
-                state_ids.append(state_from_annotator.idx)
-            else:
-                state_ids.append(int(state_from_annotator))
-            
+            state_ids.append(state_from_annotator)
             current_state = arc.dest
         
         if len(state_ids) != len(tokens):
@@ -134,8 +127,18 @@ def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states
             try:
                 tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
                 
-                # Definitive fix based on user feedback and analysis
-                materialized_state_ids = [s.idx if isinstance(s, State) else int(s) for s in state_ids_iterable]
+                materialized_state_ids = []
+                for s in state_ids_iterable:
+                    if isinstance(s, State):
+                        materialized_state_ids.append(s.idx)
+                    elif hasattr(s, '__iter__') and not isinstance(s, (str, bytes)):
+                        item = next(iter(s))
+                        if isinstance(item, State):
+                            materialized_state_ids.append(item.idx)
+                        else:
+                            materialized_state_ids.append(int(item))
+                    else:
+                        materialized_state_ids.append(int(s))
 
                 states_data.append(torch.tensor(materialized_state_ids, dtype=torch.long))
             except (KeyError, TypeError) as e:
