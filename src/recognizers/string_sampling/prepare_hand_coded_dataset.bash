@@ -35,4 +35,4 @@ python src/recognizers/string_sampling/sample_dataset.py \
   --include-log-probability \
   --include-next-symbols \
   --skip-test-edit-distance
-bash src/recognizers/neural_networks/prepare_language.bash "$base_dir" "$language"
+bash src/recognizers/neural_networks/prepare_language.bash "$base_dir" "$language" "$@"

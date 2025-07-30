@@ -18,7 +18,8 @@ for language in "${FINITE_AUTOMATON_LANGUAGES[@]}"; do
   poetry run bash src/recognizers/string_sampling/prepare_automaton_dataset.bash \
     "$BASE_DIR" \
     "$language" \
-    "$LOCAL_DEVICE"
+    "$LOCAL_DEVICE" \
+    --use-state-annotations "$BASE_DIR/$language/annotator.fst"
   echo "Finished preparing $language."
   echo "------------------------------------"
 done

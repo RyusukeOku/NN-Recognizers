@@ -58,4 +58,4 @@ python src/recognizers/string_sampling/sample_dataset.py \
   --include-next-symbols \
   --skip-test-edit-distance \
   --device "$device"
-bash src/recognizers/neural_networks/prepare_language.bash "$base_dir" "$language"
+bash src/recognizers/neural_networks/prepare_language.bash "$base_dir" "$language" "$@"

@@ -12,17 +12,17 @@ FINITE_AUTOMATON_LANGUAGES=( \
   first \
 )
 HAND_WRITTEN_LANGUAGES=( \
-  majority \
-  stack-manipulation \
-  marked-reversal \
-  unmarked-reversal \
-  marked-copy \
-  missing-duplicate-string \
-  odds-first \
-  binary-addition \
-  binary-multiplication \
-  compute-sqrt \
-  bucket-sort \
+  # majority \
+  # stack-manipulation \
+  # marked-reversal \
+  # unmarked-reversal \
+  # marked-copy \
+  # missing-duplicate-string \
+  # odds-first \
+  # binary-addition \
+  # binary-multiplication \
+  # compute-sqrt \
+  # bucket-sort \
 )
 LANGUAGES=( \
   "${FINITE_AUTOMATON_LANGUAGES[@]}" \
