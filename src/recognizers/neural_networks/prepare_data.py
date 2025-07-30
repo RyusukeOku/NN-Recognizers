@@ -55,11 +55,10 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
         return [], []
 
     input_fsa = FSA(R=annotator_fst.R)
-    num_states = len(tokens) + 1
-    for i in range(num_states):
+    for i in range(len(tokens) + 1):
         input_fsa.add_state(i)
     input_fsa.set_I(0)
-    input_fsa.add_F(num_states - 1, annotator_fst.R(0.0))
+    input_fsa.add_F(len(tokens), annotator_fst.R(0.0))
 
     for i, token in enumerate(tokens):
         input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
@@ -83,10 +82,8 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
             arc = arc_map[current_state]
             annotated_tokens.append(arc.olabel)
             
-            # arc.dest is a PairState. state1 is the state from the annotator FST.
             state_from_annotator = arc.dest.state1
             
-            # Robustly get the integer index from the state object.
             if isinstance(state_from_annotator, State):
                 state_ids.append(state_from_annotator.idx)
             else:
@@ -131,10 +128,19 @@ def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states
         states_data = []
         for line_no, line in enumerate(fin, 1):
             tokens = line.strip().split()
-            annotated_tokens, state_ids = annotate_string_and_get_states(tokens, annotator_fst)
+            annotated_tokens, state_ids_iterable = annotate_string_and_get_states(tokens, annotator_fst)
             try:
                 tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
-                states_data.append(torch.tensor(state_ids, dtype=torch.long))
+                
+                # Definitive fix: iterate through the iterable and extract .idx from State objects
+                materialized_state_ids = []
+                for s in state_ids_iterable:
+                    if isinstance(s, State):
+                        materialized_state_ids.append(s.idx)
+                    else:
+                        materialized_state_ids.append(int(s))
+
+                states_data.append(torch.tensor(materialized_state_ids, dtype=torch.long))
             except (KeyError, TypeError) as e:
                 raise ValueError(f'{input_path}:{line_no}: error processing line: {line.strip()}\nError: {e}')
         torch.save(tokens_data, output_path)
