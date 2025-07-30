@@ -1,5 +1,3 @@
-
-
 import argparse
 import json
 import pathlib
@@ -11,7 +9,7 @@ import torch
 from rayuela.fsa.fsa import FSA
 from rayuela.fsa.fst import FST
 from rayuela.base.semiring import Tropical, Real
-from rayuela.base.state import State
+from rayuela.base.state import State, PairState
 
 from rau.tasks.common.data_preparation import (
     add_prepare_data_args,
@@ -70,7 +68,8 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
         composed_fst = annotator_fst.compose(input_fsa)
         best_path = composed_fst.shortest_path()
         
-        initial_state_idx = annotator_fst.I.idx if isinstance(annotator_fst.I, State) else annotator_fst.I
+        initial_state = annotator_fst.I
+        initial_state_idx = initial_state.idx if isinstance(initial_state, State) else initial_state
 
         if not best_path or not best_path.I:
             return tokens, [initial_state_idx] * len(tokens)
@@ -84,10 +83,14 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
             arc = arc_map[current_state]
             annotated_tokens.append(arc.olabel)
             
-            # arc.dest is a PairState, its .state1 is the State from the annotator FST.
-            # We need the .idx of that State object.
+            # arc.dest is a PairState. state1 is the state from the annotator FST.
             state_from_annotator = arc.dest.state1
-            state_ids.append(state_from_annotator.idx)
+            
+            # Robustly get the integer index from the state object.
+            if isinstance(state_from_annotator, State):
+                state_ids.append(state_from_annotator.idx)
+            else:
+                state_ids.append(int(state_from_annotator))
             
             current_state = arc.dest
         
@@ -97,7 +100,8 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
         return annotated_tokens, state_ids
 
     except Exception:
-        initial_state_idx = annotator_fst.I.idx if isinstance(annotator_fst.I, State) else annotator_fst.I
+        initial_state = annotator_fst.I
+        initial_state_idx = initial_state.idx if isinstance(initial_state, State) else initial_state
         return tokens, [initial_state_idx] * len(tokens)
 
 def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
