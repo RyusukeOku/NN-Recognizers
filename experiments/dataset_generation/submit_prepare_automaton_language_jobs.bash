@@ -19,7 +19,7 @@ for language in "${FINITE_AUTOMATON_LANGUAGES[@]}"; do
     "$BASE_DIR" \
     "$language" \
     "$LOCAL_DEVICE" \
-    --use-state-annotations "$language_dir/annotator.fst"
+    --use-state-annotations "$BASE_DIR/$language/annotator.fst"
   echo "Finished preparing $language."
   echo "------------------------------------"
 done
