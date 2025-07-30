@@ -137,7 +137,10 @@ def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states
                 tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
                 # Ensure state_ids is a list of integers before creating a tensor
                 materialized_states = list(state_ids)
-                states_data.append(torch.tensor(materialized_states, dtype=torch.long))
+                # ネストされたジェネレータを単一のリストに平坦化します
+                flat_states = [state for sub_gen in materialized_states for state in sub_gen]
+                # 平坦化されたリストからテンソルを作成します
+                states_data.append(torch.tensor(flat_states, dtype=torch.long))
             except (KeyError, TypeError) as e:
                 raise ValueError(f'{input_path}:{line_no}: error processing line: {line.strip()}\nError: {e}')
         torch.save(tokens_data, output_path)
