@@ -1,3 +1,5 @@
+
+
 import argparse
 import json
 import pathlib
@@ -9,6 +11,7 @@ import torch
 from rayuela.fsa.fsa import FSA
 from rayuela.fsa.fst import FST
 from rayuela.base.semiring import Tropical, Real
+from rayuela.base.state import State
 
 from rau.tasks.common.data_preparation import (
     add_prepare_data_args,
@@ -49,7 +52,7 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
     return fst
 
 def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tuple[list[str], list[int]]:
-    """Annotates a list of tokens using the provided FST and returns state IDs."""
+    """Annotates a list of tokens using the provided FST and returns a list of integer state IDs."""
     if not tokens:
         return [], []
 
@@ -66,8 +69,11 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
     try:
         composed_fst = annotator_fst.compose(input_fsa)
         best_path = composed_fst.shortest_path()
+        
+        initial_state_idx = annotator_fst.I.idx if isinstance(annotator_fst.I, State) else annotator_fst.I
+
         if not best_path or not best_path.I:
-            return tokens, [annotator_fst.I] * len(tokens)
+            return tokens, [initial_state_idx] * len(tokens)
 
         annotated_tokens = []
         state_ids = []
@@ -77,33 +83,22 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
         while current_state in arc_map:
             arc = arc_map[current_state]
             annotated_tokens.append(arc.olabel)
-            state_part = arc.dest[0]
             
-            # Robustly extract the integer state ID
-            final_state_id = None
-            if isinstance(state_part, int):
-                final_state_id = state_part
-            elif hasattr(state_part, '__iter__') and not isinstance(state_part, (str, bytes)):
-                try:
-                    final_state_id = int(next(iter(state_part)))
-                except (StopIteration, TypeError):
-                    final_state_id = -1 # Sentinel for error
-            else:
-                try:
-                    final_state_id = int(state_part)
-                except (ValueError, TypeError):
-                    final_state_id = -1 # Sentinel
-
-            state_ids.append(final_state_id)
+            # arc.dest is a PairState, its .state1 is the State from the annotator FST.
+            # We need the .idx of that State object.
+            state_from_annotator = arc.dest.state1
+            state_ids.append(state_from_annotator.idx)
+            
             current_state = arc.dest
         
         if len(state_ids) != len(tokens):
-             return tokens, [annotator_fst.I] * len(tokens)
+             return tokens, [initial_state_idx] * len(tokens)
 
         return annotated_tokens, state_ids
 
     except Exception:
-        return tokens, [annotator_fst.I] * len(tokens)
+        initial_state_idx = annotator_fst.I.idx if isinstance(annotator_fst.I, State) else annotator_fst.I
+        return tokens, [initial_state_idx] * len(tokens)
 
 def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
     """Reads tokens, annotates them, and returns the set of unique annotated tokens."""
@@ -135,12 +130,7 @@ def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states
             annotated_tokens, state_ids = annotate_string_and_get_states(tokens, annotator_fst)
             try:
                 tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
-                # Ensure state_ids is a list of integers before creating a tensor
-                materialized_states = list(state_ids)
-                # ネストされたジェネレータを単一のリストに平坦化します
-                flat_states = [state for sub_gen in materialized_states for state in sub_gen]
-                # 平坦化されたリストからテンソルを作成します
-                states_data.append(torch.tensor(flat_states, dtype=torch.long))
+                states_data.append(torch.tensor(state_ids, dtype=torch.long))
             except (KeyError, TypeError) as e:
                 raise ValueError(f'{input_path}:{line_no}: error processing line: {line.strip()}\nError: {e}')
         torch.save(tokens_data, output_path)
