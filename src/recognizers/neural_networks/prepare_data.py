@@ -1,4 +1,3 @@
-
 import argparse
 import json
 import pathlib
@@ -80,12 +79,22 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
             annotated_tokens.append(arc.olabel)
             state_part = arc.dest[0]
             
-            # Resolve the state if it's a generator/iterator
-            if hasattr(state_part, '__iter__') and not isinstance(state_part, (str, bytes)):
-                state_ids.append(next(iter(state_part)))
+            # Robustly extract the integer state ID
+            final_state_id = None
+            if isinstance(state_part, int):
+                final_state_id = state_part
+            elif hasattr(state_part, '__iter__') and not isinstance(state_part, (str, bytes)):
+                try:
+                    final_state_id = int(next(iter(state_part)))
+                except (StopIteration, TypeError):
+                    final_state_id = -1 # Sentinel for error
             else:
-                state_ids.append(state_part)
+                try:
+                    final_state_id = int(state_part)
+                except (ValueError, TypeError):
+                    final_state_id = -1 # Sentinel
 
+            state_ids.append(final_state_id)
             current_state = arc.dest
         
         if len(state_ids) != len(tokens):
@@ -121,14 +130,16 @@ def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states
     with input_path.open() as fin:
         tokens_data = []
         states_data = []
-        for line in fin:
+        for line_no, line in enumerate(fin, 1):
             tokens = line.strip().split()
             annotated_tokens, state_ids = annotate_string_and_get_states(tokens, annotator_fst)
             try:
                 tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
-                states_data.append(torch.tensor(state_ids, dtype=torch.long))
-            except KeyError as e:
-                raise ValueError(f'{input_path}: unknown token: {e}')
+                # Ensure state_ids is a list of integers before creating a tensor
+                materialized_states = list(state_ids)
+                states_data.append(torch.tensor(materialized_states, dtype=torch.long))
+            except (KeyError, TypeError) as e:
+                raise ValueError(f'{input_path}:{line_no}: error processing line: {line.strip()}\nError: {e}')
         torch.save(tokens_data, output_path)
         torch.save(states_data, states_output_path)
 
@@ -223,7 +234,7 @@ def main():
 
     if args.always_allow_unk and args.never_allow_unk:
         parser.error('cannot pass both --always-allow-unk and --never-allow-unk')
-    if args.use_state_annotations and not args.fst_annotator-path:
+    if args.use_state_annotations and not args.fst_annotator_path:
         parser.error('--fst-annotator-path is required for --use-state-annotations')
 
     # Load and reconstruct annotator FST if needed
