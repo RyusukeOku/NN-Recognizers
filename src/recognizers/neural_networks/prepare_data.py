@@ -1,3 +1,5 @@
+
+
 import argparse
 import json
 import pathlib
@@ -132,13 +134,8 @@ def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states
             try:
                 tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
                 
-                # Definitive fix: iterate through the iterable and extract .idx from State objects
-                materialized_state_ids = []
-                for s in state_ids_iterable:
-                    if isinstance(s, State):
-                        materialized_state_ids.append(s.idx)
-                    else:
-                        materialized_state_ids.append(int(s))
+                # Definitive fix based on user feedback and analysis
+                materialized_state_ids = [s.idx if isinstance(s, State) else int(s) for s in state_ids_iterable]
 
                 states_data.append(torch.tensor(materialized_state_ids, dtype=torch.long))
             except (KeyError, TypeError) as e:
