@@ -54,7 +54,6 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
     if not tokens:
         return [], []
 
-    # Manually construct a linear FSA from the input tokens
     input_fsa = FSA(R=annotator_fst.R)
     num_states = len(tokens) + 1
     for i in range(num_states):
@@ -69,38 +68,33 @@ def annotate_string_and_get_states(tokens: list[str], annotator_fst: FST) -> tup
         composed_fst = annotator_fst.compose(input_fsa)
         best_path = composed_fst.shortest_path()
         if not best_path or not best_path.I:
-            # Fallback if no path is found
             return tokens, [annotator_fst.I] * len(tokens)
 
-        # Traverse the best path to extract annotated tokens and state IDs
         annotated_tokens = []
         state_ids = []
-        
-        # The states in the composed FST are tuples: (state_from_annotator, state_from_input)
-        # We start from the initial state of the best path.
         current_state = best_path.I
-        
-        # Create a map from source state to arc for easy traversal
-        # Since it's a single path, each state (except the final one) has one outgoing arc.
         arc_map = {arc.source: arc for arc in best_path.arcs}
 
         while current_state in arc_map:
             arc = arc_map[current_state]
             annotated_tokens.append(arc.olabel)
-            # The destination state of the arc is a tuple, we want the first element.
-            state_ids.append(arc.dest[0])
+            state_part = arc.dest[0]
+            
+            # Resolve the state if it's a generator/iterator
+            if hasattr(state_part, '__iter__') and not isinstance(state_part, (str, bytes)):
+                state_ids.append(next(iter(state_part)))
+            else:
+                state_ids.append(state_part)
+
             current_state = arc.dest
         
-        # Ensure the lengths match, otherwise something is wrong.
         if len(state_ids) != len(tokens):
              return tokens, [annotator_fst.I] * len(tokens)
 
         return annotated_tokens, state_ids
 
     except Exception:
-        # Fallback in case of any error during composition or pathfinding
         return tokens, [annotator_fst.I] * len(tokens)
-
 
 def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
     """Reads tokens, annotates them, and returns the set of unique annotated tokens."""
@@ -129,15 +123,12 @@ def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states
         states_data = []
         for line in fin:
             tokens = line.strip().split()
-            annotated_tokens, state_ids_gen = annotate_string_and_get_states(tokens, annotator_fst)
+            annotated_tokens, state_ids = annotate_string_and_get_states(tokens, annotator_fst)
             try:
                 tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
-                # state_ids_gen might be a list of generators, extract the integer from each.
-                # Also, ensure all states are integers before creating the tensor.
-                materialized_state_ids = [int(s) for s in state_ids_gen]
-                states_data.append(torch.tensor(materialized_state_ids, dtype=torch.long))
-            except (KeyError, TypeError) as e:
-                raise ValueError(f'{input_path}: error processing line: {line.strip()}\nError: {e}')
+                states_data.append(torch.tensor(state_ids, dtype=torch.long))
+            except KeyError as e:
+                raise ValueError(f'{input_path}: unknown token: {e}')
         torch.save(tokens_data, output_path)
         torch.save(states_data, states_output_path)
 
@@ -232,7 +223,7 @@ def main():
 
     if args.always_allow_unk and args.never_allow_unk:
         parser.error('cannot pass both --always-allow-unk and --never-allow-unk')
-    if args.use_state_annotations and not args.fst_annotator_path:
+    if args.use_state_annotations and not args.fst_annotator-path:
         parser.error('--fst-annotator-path is required for --use-state-annotations')
 
     # Load and reconstruct annotator FST if needed
