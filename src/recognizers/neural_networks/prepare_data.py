@@ -129,13 +129,15 @@ def prepare_annotated_file_and_states(vocab, annotator_fst, strings_pair, states
         states_data = []
         for line in fin:
             tokens = line.strip().split()
-            annotated_tokens, state_ids = annotate_string_and_get_states(tokens, annotator_fst)
+            annotated_tokens, state_ids_gen = annotate_string_and_get_states(tokens, annotator_fst)
             try:
                 tokens_data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
-                # Materialize the state_ids generator (if it is one) into a list
-                states_data.append(torch.tensor(list(state_ids), dtype=torch.long))
-            except KeyError as e:
-                raise ValueError(f'{input_path}: unknown token: {e}')
+                # state_ids_gen might be a list of generators, extract the integer from each.
+                # Also, ensure all states are integers before creating the tensor.
+                materialized_state_ids = [int(s) for s in state_ids_gen]
+                states_data.append(torch.tensor(materialized_state_ids, dtype=torch.long))
+            except (KeyError, TypeError) as e:
+                raise ValueError(f'{input_path}: error processing line: {line.strip()}\nError: {e}')
         torch.save(tokens_data, output_path)
         torch.save(states_data, states_output_path)
 
