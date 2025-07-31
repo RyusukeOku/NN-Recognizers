@@ -119,6 +119,8 @@ def prepare_states_file(annotator_fst, strings_pair, states_pair):
                         item = next(iter(s))
                         if isinstance(item, State):
                             materialized_state_ids.append(item.idx)
+                        elif isinstance(item, tuple):
+                            materialized_state_ids.append(int(item[0]))
                         else:
                             materialized_state_ids.append(int(item))
                     else:
