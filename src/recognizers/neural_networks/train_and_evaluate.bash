@@ -49,12 +49,40 @@ progress_args=("$@")
 
 language_dir=$(get_language_dir "$base_dir" "$language")
 
-model_flags=($( \
-  python src/recognizers/neural_networks/get_architecture_args.py \
-    --architecture "$architecture" \
-    --parameter-budget 64000 \
-    --training-data "$language_dir" \
-))
+# get_architecture_args.pyの出力を解析して、必要な引数を抽出
+ARCH_ARGS_OUTPUT=$(python src/recognizers/neural_networks/get_architecture_args.py \
+  --architecture "$architecture" \
+  --parameter-budget 64000 \
+  --training-data "$language_dir" \
+)
+
+# model_flagsを初期化
+model_flags=()
+
+# 出力をスペースで分割し、各引数を処理
+for arg_pair in $ARCH_ARGS_OUTPUT; do
+  # 引数名と値に分割
+  arg_name=$(echo "$arg_pair" | cut -d' ' -f1)
+  arg_value=$(echo "$arg_pair" | cut -d' ' -f2)
+
+  case "$arg_name" in
+    --num-layers)
+      NUM_LAYERS="$arg_value";;
+    --d-model)
+      D_MODEL="$arg_value";;
+    --num-heads)
+      NUM_HEADS="$arg_value";;
+    --feedforward-size)
+      FEEDFORWARD_SIZE="$arg_value";;
+    --dropout)
+      DROPOUT="$arg_value";;
+    --hidden-units)
+      HIDDEN_UNITS="$arg_value";;
+    *)
+      # その他の引数はそのままmodel_flagsに追加
+      model_flags+=("$arg_name" "$arg_value");;
+  esac
+done
 
 loss_term_flags=()
 for loss_term in ${loss_terms//+/ }; do
@@ -103,11 +131,11 @@ case "$architecture" in
   transformer)
     EMBEDDING_SIZE=24 # 例: Transformerのトークン埋め込みサイズ
     STATE_EMBEDDING_SIZE=8 # 例: Transformerの状態埋め込みサイズ
-    D_MODEL=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # d_modelは合計サイズ
+    D_MODEL_CALCULATED=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # d_modelは合計サイズ
     TRAINING_ARGS+=(
       "--architecture" "$architecture"
       "--num-layers" "$NUM_LAYERS"
-      "--d-model" "$D_MODEL"
+      "--d-model" "$D_MODEL_CALCULATED"
       "--num-heads" "$NUM_HEADS"
       "--feedforward-size" "$FEEDFORWARD_SIZE"
       "--dropout" "$DROPOUT"
@@ -118,11 +146,11 @@ case "$architecture" in
   rnn)
     EMBEDDING_SIZE=60 # 例: RNNのトークン埋め込みサイズ
     STATE_EMBEDDING_SIZE=19 # 例: RNNの状態埋め込みサイズ
-    HIDDEN_UNITS=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # hidden_unitsは合計サイズ
+    HIDDEN_UNITS_CALCULATED=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # hidden_unitsは合計サイズ
     TRAINING_ARGS+=(
       "--architecture" "$architecture"
       "--num-layers" "$NUM_LAYERS"
-      "--hidden-units" "$HIDDEN_UNITS"
+      "--hidden-units" "$HIDDEN_UNITS_CALCULATED"
       "--dropout" "$DROPOUT"
       "--embedding-size" "$EMBEDDING_SIZE"
       "--state-embedding-size" "$STATE_EMBEDDING_SIZE"
@@ -131,11 +159,11 @@ case "$architecture" in
   lstm)
     EMBEDDING_SIZE=30 # 例: LSTMのトークン埋め込みサイズ
     STATE_EMBEDDING_SIZE=10 # 例: LSTMの状態埋め込みサイズ
-    HIDDEN_UNITS=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # hidden_unitsは合計サイズ
+    HIDDEN_UNITS_CALCULATED=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # hidden_unitsは合計サイズ
     TRAINING_ARGS+=(
       "--architecture" "$architecture"
       "--num-layers" "$NUM_LAYERS"
-      "--hidden-units" "$HIDDEN_UNITS"
+      "--hidden-units" "$HIDDEN_UNITS_CALCULATED"
       "--dropout" "$DROPOUT"
       "--embedding-size" "$EMBEDDING_SIZE"
       "--state-embedding-size" "$STATE_EMBEDDING_SIZE"

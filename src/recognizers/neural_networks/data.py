@@ -2,6 +2,7 @@ import dataclasses
 import itertools
 import pathlib
 from collections.abc import Iterable
+from typing import Optional
 
 import torch
 
