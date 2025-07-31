@@ -120,7 +120,11 @@ def prepare_states_file(annotator_fst, strings_pair, states_pair):
                         if isinstance(item, State):
                             materialized_state_ids.append(item.idx)
                         elif isinstance(item, tuple):
-                            materialized_state_ids.append(int(item[0]))
+                            element_to_convert = item[0]
+                            if isinstance(element_to_convert, State):
+                                materialized_state_ids.append(element_to_convert.idx)
+                            else:
+                                materialized_state_ids.append(int(element_to_convert))
                         else:
                             materialized_state_ids.append(int(item))
                     else:
