@@ -105,6 +105,26 @@ def prepare_states_file(annotator_fst, strings_pair, states_pair):
     
     states_output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    def add_state_ids(collection, target_list):
+        """
+        Recursively traverses the data structure to find and add state IDs to the target list.
+        """
+        if isinstance(collection, State):
+            target_list.append(collection.idx)
+            return
+
+        if hasattr(collection, '__iter__') and not isinstance(collection, (str, bytes)):
+            for item in collection:
+                add_state_ids(item, target_list)  # Recursive call
+            return
+        
+        try:
+            target_list.append(int(collection))
+        except (TypeError, ValueError):
+            # For any other type that cannot be converted to int, we can either ignore,
+            # log, or raise an error. For now, we'll silently ignore.
+            pass
+
     with input_path.open() as fin:
         states_data = []
         for line_no, line in enumerate(fin, 1):
@@ -112,32 +132,11 @@ def prepare_states_file(annotator_fst, strings_pair, states_pair):
             _, state_ids_iterable = annotate_string_and_get_states(tokens, annotator_fst)
             try:
                 materialized_state_ids = []
-                for s in state_ids_iterable:
-                    if isinstance(s, State):
-                        materialized_state_ids.append(s.idx)
-                    elif hasattr(s, '__iter__') and not isinstance(s, (str, bytes)):
-                        try:
-                            item = next(iter(s))
-                        except StopIteration:
-                            continue
-                        if isinstance(item, State):
-                            materialized_state_ids.append(item.idx)
-                        elif isinstance(item, tuple):
-                            element_to_convert = item[0]
-                            if isinstance(element_to_convert, State):
-                                materialized_state_ids.append(element_to_convert.idx)
-                            else:
-                                materialized_state_ids.append(int(element_to_convert))
-                        else:
-                            if isinstance(item, State):
-                                materialized_state_ids.append(item.idx)
-                            else:
-                                materialized_state_ids.append(int(item))
-                    else:
-                        materialized_state_ids.append(int(s))
-
-                states_data.append(torch.tensor(materialized_state_ids, dtype=torch.long))
-            except (KeyError, TypeError) as e:
+                add_state_ids(state_ids_iterable, materialized_state_ids)
+                
+                if materialized_state_ids:
+                    states_data.append(torch.tensor(materialized_state_ids, dtype=torch.long))
+            except Exception as e:
                 raise ValueError(f'{input_path}:{line_no}: error processing line: {line.strip()}\nError: {e}')
         torch.save(states_data, states_output_path)
 
