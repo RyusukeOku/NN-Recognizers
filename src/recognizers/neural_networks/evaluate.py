@@ -20,7 +20,7 @@ def evaluate(model, model_interface, batches, num_examples):
     model.eval()
     with torch.inference_mode():
         for indexed_batch in batches:
-            batch = [(x, d) for x, (i, d) in indexed_batch]
+            batch = [(x, s, d) for x, s, (i, d) in indexed_batch]
             prepared_batch = model_interface.prepare_batch(batch, device)
             batch_score_dict = get_loss_terms(
                 model,
@@ -32,7 +32,7 @@ def evaluate(model, model_interface, batches, num_examples):
                 include_accuracy=True
             )
             example_score_dicts = split_score_dict(batch, batch_score_dict)
-            for (x, (i, d)), example_score_dict in zip(indexed_batch, example_score_dicts):
+            for (x, s, (i, d)), example_score_dict in zip(indexed_batch, example_score_dicts):
                 example_scores[i] = example_score_dict
     return example_scores
 
@@ -56,7 +56,7 @@ def split_score_dict(batch, batch_score_dict):
     }
     positive_index = 0
     for index, example in enumerate(batch):
-        label = example[1][0]
+        label = example[2]
         example_score_dict = {}
         for key, (numerator, denominator) in batch_score_dict.items():
             if len(numerator) < len(batch):
@@ -115,7 +115,7 @@ def main():
             input_directory,
             model_interface
         )
-        examples = [(x, (i, d)) for i, (x, d) in enumerate(examples)]
+        examples = [(x, s, (i, d)) for i, (x, s, d) in enumerate(examples)]
         batches = generate_batches(examples, args.batching_max_tokens)
         scores = evaluate(saver.model, model_interface, batches, len(examples))
         accumulator = DictScoreAccumulator()

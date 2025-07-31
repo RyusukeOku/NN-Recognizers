@@ -13,7 +13,7 @@ from rau.tools.torch.model_interface import ModelInterface
 
 from .batching import group_into_batches
 from .data import VocabularyContainer
-from .model_interface_original import ModelInput
+from .model_interface import ModelInput
 
 def add_training_loop_arguments(parser):
     group = common_add_training_loop_arguments(parser,
@@ -35,7 +35,7 @@ def get_training_loop_kwargs(parser, args):
         result[name] = getattr(args, name)
     return result
 
-Example = tuple[torch.Tensor, tuple[bool, Optional[torch.Tensor]]]
+Example = tuple[torch.Tensor, torch.Tensor, bool]
 PreparedBatch = tuple[
     ModelInput,
     tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]
@@ -314,3 +314,5 @@ def get_loss_terms(
                 num_positive_denominator
             )
     return result
+ result
+result
