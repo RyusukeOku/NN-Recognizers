@@ -129,7 +129,10 @@ def prepare_states_file(annotator_fst, strings_pair, states_pair):
                             else:
                                 materialized_state_ids.append(int(element_to_convert))
                         else:
-                            materialized_state_ids.append(int(item))
+                            if isinstance(item, State):
+                                materialized_state_ids.append(item.idx)
+                            else:
+                                materialized_state_ids.append(int(item))
                     else:
                         materialized_state_ids.append(int(s))
 
