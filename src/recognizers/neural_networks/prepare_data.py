@@ -110,6 +110,10 @@ def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
         token_types.add(unk_string)
         state_types.add(unk_string) # Assuming UNK state is also possible
 
+    # Ensure state_types is not empty if state annotations are used
+    if not state_types:
+        state_types.add("UNK_STATE") # Add a default UNK state if no states were found
+
     return sorted(list(token_types)), sorted(list(state_types))
 
 def prepare_annotated_file(token_vocab, state_vocab, pair, annotator):
