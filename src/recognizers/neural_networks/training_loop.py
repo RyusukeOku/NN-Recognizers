@@ -314,5 +314,3 @@ def get_loss_terms(
                 num_positive_denominator
             )
     return result
- result
-result
