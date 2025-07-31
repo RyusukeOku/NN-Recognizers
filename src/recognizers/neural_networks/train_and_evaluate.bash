@@ -80,26 +80,81 @@ for loss_term in ${loss_terms//+/ }; do
 done
 
 model_dir=$(get_model_dir "$base_dir" "$language" "$architecture" "$loss_terms" "$validation_data" "$trial_no")
-python src/recognizers/neural_networks/train.py \
-  --output "$model_dir" \
-  --training-data "$language_dir" \
-  --validation-data "$validation_data" \
-  --architecture 'hybrid_csg' \
-  --hybrid-base-architecture "$architecture" \
-  --embedding-size $(case "$architecture" in transformer) echo 32;; rnn) echo 79;; lstm) echo 40;; esac) \
-  --lba-hidden-size 32 \
-  --lba-n-steps 150 \
-  "${model_flags[@]}" \
-  --init-scale 0.1 \
-  "${loss_term_flags[@]}" \
-  --max-epochs 1000 \
-  --max-tokens-per-batch "$(random_sample --int 128 4096)" \
-  --optimizer Adam \
-  --initial-learning-rate "$(random_sample --log 0.0001 0.01)" \
-  --gradient-clipping-threshold 5 \
-  --early-stopping-patience 10 \
-  --learning-rate-patience 5 \
-  --learning-rate-decay-factor 0.5 \
-  --examples-per-checkpoint 10000 \
+
+TRAINING_ARGS=(
+  "--output" "$model_dir"
+  "--training-data" "$language_dir"
+  "--validation-data" "$validation_data"
+  "--init-scale" "0.1"
+  "${loss_term_flags[@]}"
+  "--max-epochs" "1000"
+  "--max-tokens-per-batch" "$(random_sample --int 128 4096)"
+  "--optimizer" "Adam"
+  "--initial-learning-rate" "$(random_sample --log 0.0001 0.01)"
+  "--gradient-clipping-threshold" "5"
+  "--early-stopping-patience" "10"
+  "--learning-rate-patience" "5"
+  "--learning-rate-decay-factor" "0.5"
+  "--examples-per-checkpoint" "10000"
   "${progress_args[@]}"
+)
+
+case "$architecture" in
+  transformer)
+    EMBEDDING_SIZE=24 # 例: Transformerのトークン埋め込みサイズ
+    STATE_EMBEDDING_SIZE=8 # 例: Transformerの状態埋め込みサイズ
+    D_MODEL=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # d_modelは合計サイズ
+    TRAINING_ARGS+=(
+      "--architecture" "$architecture"
+      "--num-layers" "$NUM_LAYERS"
+      "--d-model" "$D_MODEL"
+      "--num-heads" "$NUM_HEADS"
+      "--feedforward-size" "$FEEDFORWARD_SIZE"
+      "--dropout" "$DROPOUT"
+      "--embedding-size" "$EMBEDDING_SIZE"
+      "--state-embedding-size" "$STATE_EMBEDDING_SIZE"
+    )
+    ;;
+  rnn)
+    EMBEDDING_SIZE=60 # 例: RNNのトークン埋め込みサイズ
+    STATE_EMBEDDING_SIZE=19 # 例: RNNの状態埋め込みサイズ
+    HIDDEN_UNITS=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # hidden_unitsは合計サイズ
+    TRAINING_ARGS+=(
+      "--architecture" "$architecture"
+      "--num-layers" "$NUM_LAYERS"
+      "--hidden-units" "$HIDDEN_UNITS"
+      "--dropout" "$DROPOUT"
+      "--embedding-size" "$EMBEDDING_SIZE"
+      "--state-embedding-size" "$STATE_EMBEDDING_SIZE"
+    )
+    ;;
+  lstm)
+    EMBEDDING_SIZE=30 # 例: LSTMのトークン埋め込みサイズ
+    STATE_EMBEDDING_SIZE=10 # 例: LSTMの状態埋め込みサイズ
+    HIDDEN_UNITS=$((EMBEDDING_SIZE + STATE_EMBEDDING_SIZE)) # hidden_unitsは合計サイズ
+    TRAINING_ARGS+=(
+      "--architecture" "$architecture"
+      "--num-layers" "$NUM_LAYERS"
+      "--hidden-units" "$HIDDEN_UNITS"
+      "--dropout" "$DROPOUT"
+      "--embedding-size" "$EMBEDDING_SIZE"
+      "--state-embedding-size" "$STATE_EMBEDDING_SIZE"
+    )
+    ;;
+  hybrid_csg)
+    TRAINING_ARGS+=(
+      "--architecture" "$architecture"
+      "--hybrid-base-architecture" "$architecture" # ここは元のまま
+      "--embedding-size" "$(case "$architecture" in transformer) echo 32;; rnn) echo 79;; lstm) echo 40;; esac)" # 元のembedding-size
+      "--lba-hidden-size" "32"
+      "--lba-n-steps" "150"
+    )
+    ;;
+  *)
+    echo "Unknown architecture: $architecture" >&2
+    exit 1
+    ;;
+esac
+
+poetry run python src/recognizers/neural_networks/train.py "${TRAINING_ARGS[@]}"
 bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir"

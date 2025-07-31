@@ -128,8 +128,8 @@ class RecognitionModelInterface(ModelInterface):
             help='(transformer only) The type of positional encoding to use.')
         group.add_argument('--reset-symbols', type=str, default='+#-=×*()[]_POPUSH',
             help='(transformer with resettable encoding only) The symbols that reset the position.')
-        group.add_argument('--embedding-size', type=int, help='(hybrid_csg) Embedding size for tokens.')
-        group.add_argument('--state-embedding-size', type=int, help='(hybrid_csg) Embedding size for states.')
+        group.add_argument('--embedding-size', type=int, help='Embedding size for tokens (all architectures).')
+        group.add_argument('--state-embedding-size', type=int, help='Embedding size for states (all architectures).')
         group.add_argument('--lba-hidden-size', type=int, default=40, help='(hybrid_csg) Hidden size for NeuralLBA.')
         group.add_argument('--lba-n-steps', type=int, default=100, help='(hybrid_csg) Number of steps for NeuralLBA.')
 
@@ -137,7 +137,7 @@ class RecognitionModelInterface(ModelInterface):
     def get_kwargs(self, args, vocabulary_data):
         uses_bos = args.architecture == 'transformer' or (args.architecture == 'hybrid_csg' and args.hybrid_base_architecture == 'transformer')
         uses_output_vocab = args.use_language_modeling_head or args.use_next_symbols_head
-        input_vocab, output_vocab = get_vocabularies(
+        input_vocab, output_vocab, state_vocab = get_vocabularies(
             vocabulary_data,
             use_bos=uses_bos,
             use_eos=uses_output_vocab
@@ -161,7 +161,7 @@ class RecognitionModelInterface(ModelInterface):
             use_language_modeling_head=args.use_language_modeling_head,
             use_next_symbols_head=args.use_next_symbols_head,
             input_vocabulary_size=len(input_vocab),
-            state_vocabulary_size=len(vocabulary_data['states']) if 'states' in vocabulary_data else 0,
+            state_vocabulary_size=len(state_vocab) if state_vocab else 0,
             output_vocabulary_size=len(output_vocab) if uses_output_vocab else None,
             bos_index=input_vocab.bos_index if uses_bos else None,
             eos_index=output_vocab.eos_index if uses_output_vocab else None,
@@ -215,32 +215,25 @@ class RecognitionModelInterface(ModelInterface):
             device=self.get_device(None)
         )
 
-    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, **kwargs):
+    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, state_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, embedding_size, state_embedding_size, **kwargs):
         core_pipeline = None
         output_size = 0
-        shared_embeddings = None
+        
+        combined_embedding_size = embedding_size + state_embedding_size
 
         if architecture == 'transformer':
             if num_layers is None or d_model is None or num_heads is None or feedforward_size is None or dropout is None:
                 raise ValueError("Transformer parameters are required.")
+            if d_model != combined_embedding_size:
+                raise ValueError(f"For transformer, d_model ({d_model}) must equal combined embedding size ({combined_embedding_size}).")
             
+            # shared_embeddingsはOutputHeadsに渡すために必要
             shared_embeddings = get_shared_embeddings(
                 tie_embeddings=use_language_modeling_head, input_vocabulary_size=input_vocabulary_size,
                 output_vocabulary_size=output_vocabulary_size, embedding_size=d_model, use_padding=False
             )
-            if positional_encoding == 'resettable':
-                input_layer = ResettablePositionalInputLayer(
-                    vocabulary_size=input_vocabulary_size, d_model=d_model, reset_symbols=reset_symbol_ids,
-                    dropout=dropout, use_padding=False, shared_embeddings=shared_embeddings
-                )
-            else:
-                input_layer = get_transformer_input_unidirectional(
-                    vocabulary_size=input_vocabulary_size, d_model=d_model, dropout=dropout,
-                    use_padding=False, shared_embeddings=shared_embeddings
-                )
-            
+
             core_pipeline = (
-                input_layer @
                 UnidirectionalTransformerEncoderLayers(
                     num_layers=num_layers, d_model=d_model, num_heads=num_heads,
                     feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
@@ -251,18 +244,16 @@ class RecognitionModelInterface(ModelInterface):
         elif architecture in ('rnn', 'lstm'):
             if hidden_units is None or num_layers is None or dropout is None:
                 raise ValueError("RNN/LSTM parameters are required.")
+            if hidden_units != combined_embedding_size:
+                raise ValueError(f"For RNN/LSTM, hidden_units ({hidden_units}) must equal combined embedding size ({combined_embedding_size}).")
 
             shared_embeddings = get_shared_embeddings(
                 tie_embeddings=use_language_modeling_head, input_vocabulary_size=input_vocabulary_size,
                 output_vocabulary_size=output_vocabulary_size, embedding_size=hidden_units, use_padding=False
             )
             RecurrentModel = SimpleRNN if architecture == 'rnn' else LSTM
-            core = RecurrentModel(input_size=hidden_units, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
+            core = RecurrentModel(input_size=combined_embedding_size, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
             core_pipeline = (
-                EmbeddingUnidirectional(
-                    vocabulary_size=input_vocabulary_size, output_size=hidden_units,
-                    use_padding=False, shared_embeddings=shared_embeddings
-                ) @
                 DropoutUnidirectional(dropout) @
                 core.main() @
                 DropoutUnidirectional(dropout)
@@ -300,6 +291,23 @@ class RecognitionModelInterface(ModelInterface):
         self.use_next_symbols_head = saver.kwargs['use_next_symbols_head']
         self.add_ngram_head_n = saver.kwargs.get('add_ngram_head_n', 0)
         self.architecture = saver.kwargs.get('architecture')
+
+        # Create token and state embedding layers
+        self.token_embedding = EmbeddingLayer(
+            vocabulary_size=saver.kwargs['input_vocabulary_size'],
+            output_size=saver.kwargs['embedding_size'],
+            use_padding=False
+        )
+        self.state_embedding = EmbeddingLayer(
+            vocabulary_size=saver.kwargs['state_vocabulary_size'],
+            output_size=saver.kwargs['state_embedding_size'],
+            use_padding=False
+        )
+
+        # For transformer with sinusoidal positional encoding
+        self.positional_encoding_adder = None
+        if self.architecture == 'transformer' and saver.kwargs['positional_encoding'] == 'sinusoidal':
+            self.positional_encoding_adder = SinusoidalPositionalEncodingCacher()
 
         if self.use_language_modeling_head:
             self.output_padding_index = saver.kwargs['output_vocabulary_size']
@@ -402,6 +410,17 @@ class RecognitionModelInterface(ModelInterface):
                 positive_mask=model_input.positive_mask
             )
             
+        # Embed tokens and states separately
+        token_embedded = self.token_embedding(model_input.input_sequence)
+        state_embedded = self.state_embedding(model_input.state_sequence)
+        
+        # Concatenate the embeddings
+        combined_embedded = torch.cat((token_embedded, state_embedded), dim=-1)
+
+        # Apply positional encoding for Transformer
+        if self.architecture == 'transformer' and self.positional_encoding_adder:
+            combined_embedded = self.positional_encoding_adder(combined_embedded)
+
         core_kwargs = {'include_first': not self.uses_bos}
         core_internal_tag_kwargs = {}
         if self.add_ngram_head_n > 0:
@@ -417,7 +436,7 @@ class RecognitionModelInterface(ModelInterface):
                 positive_mask=model_input.positive_mask
             )
         )
-        return model(model_input.input_sequence, tag_kwargs=tag_kwargs)
+        return model(combined_embedded, tag_kwargs=tag_kwargs)
 
 
 class OutputHeads(torch.nn.Module):
