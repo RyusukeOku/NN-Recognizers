@@ -50,20 +50,22 @@ progress_args=("$@")
 language_dir=$(get_language_dir "$base_dir" "$language")
 
 # get_architecture_args.pyの出力を解析して、必要な引数を抽出
-ARCH_ARGS_OUTPUT=$(python src/recognizers/neural_networks/get_architecture_args.py \
+ARCH_ARGS_OUTPUT_RAW=$(python src/recognizers/neural_networks/get_architecture_args.py \
   --architecture "$architecture" \
   --parameter-budget 64000 \
   --training-data "$language_dir" \
 )
 
+# 出力を配列に格納
+read -r -a ARCH_ARGS_ARRAY <<< "$ARCH_ARGS_OUTPUT_RAW"
+
 # model_flagsを初期化
 model_flags=()
 
-# 出力をスペースで分割し、各引数を処理
-for arg_pair in $ARCH_ARGS_OUTPUT; do
-  # 引数名と値に分割
-  arg_name=$(echo "$arg_pair" | cut -d' ' -f1)
-  arg_value=$(echo "$arg_pair" | cut -d' ' -f2)
+# ARCH_ARGS_ARRAYから引数を処理
+for ((i=0; i<${#ARCH_ARGS_ARRAY[@]}; i+=2)); do
+  arg_name="${ARCH_ARGS_ARRAY[i]}"
+  arg_value="${ARCH_ARGS_ARRAY[i+1]}"
 
   case "$arg_name" in
     --num-layers)
@@ -83,6 +85,7 @@ for arg_pair in $ARCH_ARGS_OUTPUT; do
       model_flags+=("$arg_name" "$arg_value");;
   esac
 done
+
 
 loss_term_flags=()
 for loss_term in ${loss_terms//+/ }; do
