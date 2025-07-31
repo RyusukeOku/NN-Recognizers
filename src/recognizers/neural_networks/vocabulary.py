@@ -1,6 +1,6 @@
 import dataclasses
 import pathlib
-from typing import Optional
+from typing import Optional, List
 
 import torch
 
@@ -11,17 +11,18 @@ from rau.vocab import Vocabulary, VocabularyBuilder, ToStringVocabularyBuilder
 class VocabularyData:
     tokens: list[str]
     allow_unk: bool
+    states: Optional[List[str]] = None
 
 def load_vocabulary_data_from_file(path: pathlib.Path) -> VocabularyData:
     data = torch.load(path)
-    return VocabularyData(data['tokens'], data['allow_unk'])
+    return VocabularyData(data['tokens'], data['allow_unk'], data.get('states'))
 
 def get_vocabularies(
     vocabulary_data: VocabularyData,
     use_bos: bool,
     use_eos: bool,
     builder: Optional[VocabularyBuilder]=None
-) -> tuple[Vocabulary, Vocabulary]:
+) -> tuple[Vocabulary, Vocabulary, Optional[Vocabulary]]:
     if builder is None:
         builder = ToStringVocabularyBuilder()
     softmax_vocab = build_softmax_vocab(
@@ -35,7 +36,17 @@ def get_vocabularies(
         use_bos,
         builder
     )
-    return embedding_vocab, softmax_vocab
+
+    state_vocab = None
+    if vocabulary_data.states:
+        state_vocab = build_softmax_vocab(
+            vocabulary_data.states,
+            vocabulary_data.allow_unk,
+            False, # No EOS for states
+            builder
+        )
+
+    return embedding_vocab, softmax_vocab, state_vocab
 
 def build_softmax_vocab(tokens, allow_unk, use_eos, builder):
     result = builder.content(tokens)

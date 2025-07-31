@@ -14,6 +14,7 @@ from .vocabulary import VocabularyData, load_vocabulary_data_from_file
 class VocabularyContainer:
     input_vocab: ToStringVocabulary
     output_vocab: ToStringVocabulary
+    state_vocab: Optional[ToStringVocabulary] = None
 
 def add_data_arguments(parser, validation=True):
     group = parser.add_argument_group('Dataset options')
@@ -78,19 +79,19 @@ def load_prepared_data(args, parser, vocabulary_data, model_interface, builder=N
         )
     else:
         validation_data = None
-    input_vocab, output_vocab = model_interface.get_vocabularies(
+    input_vocab, output_vocab, state_vocab = model_interface.get_vocabularies(
         vocabulary_data,
         builder
     )
     return (
         training_data,
         validation_data,
-        VocabularyContainer(input_vocab, output_vocab)
+        VocabularyContainer(input_vocab, output_vocab, state_vocab)
     )
 
 def load_vocabularies(args, parser, model_interface, builder=None):
-    input_vocab, output_vocab = model_interface.get_vocabularies(
+    input_vocab, output_vocab, state_vocab = model_interface.get_vocabularies(
         load_vocabulary_data(args, parser),
         builder
     )
-    return VocabularyContainer(input_vocab, output_vocab)
+    return VocabularyContainer(input_vocab, output_vocab, state_vocab)

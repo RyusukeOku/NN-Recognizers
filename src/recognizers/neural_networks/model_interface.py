@@ -31,6 +31,7 @@ from .lba import NeuralLBA
 @dataclasses.dataclass
 class ModelInput:
     input_sequence: torch.Tensor
+    state_sequence: torch.Tensor
     last_index: torch.Tensor
     positive_mask: Optional[torch.Tensor]
     input_ids: torch.Tensor
@@ -42,7 +43,9 @@ class HybridCSGModel(nn.Module):
     """
     def __init__(self,
                  input_vocabulary_size,
+                 state_vocabulary_size,
                  embedding_size,
+                 state_embedding_size,
                  main_model,
                  main_model_output_size,
                  lba_hidden_size,
@@ -51,16 +54,22 @@ class HybridCSGModel(nn.Module):
                  shared_embeddings=None):
         super().__init__()
 
-        self.embedding = EmbeddingLayer(
+        self.token_embedding = EmbeddingLayer(
             vocabulary_size=input_vocabulary_size,
             output_size=embedding_size,
+            use_padding=False,
+            shared_embeddings=shared_embeddings
+        )
+        self.state_embedding = EmbeddingLayer(
+            vocabulary_size=state_vocabulary_size,
+            output_size=state_embedding_size,
             use_padding=False,
             shared_embeddings=shared_embeddings
         )
         
         self.main_model = main_model
         self.sub_network = NeuralLBA(
-            input_size=embedding_size,
+            input_size=embedding_size + state_embedding_size,
             hidden_size=lba_hidden_size,
             n_steps=lba_n_steps,
             device=device
@@ -68,8 +77,10 @@ class HybridCSGModel(nn.Module):
         
         self.classifier = nn.Linear(main_model_output_size + lba_hidden_size, 1)
 
-    def forward(self, input_sequence, last_index, **kwargs):
-        embedded = self.embedding(input_sequence)
+    def forward(self, input_sequence, state_sequence, last_index, **kwargs):
+        token_embedded = self.token_embedding(input_sequence)
+        state_embedded = self.state_embedding(state_sequence)
+        embedded = torch.cat((token_embedded, state_embedded), dim=-1)
         
         main_output_sequence = self.main_model(embedded, include_first=True)
         last_main_hidden = torch.gather(
@@ -117,7 +128,8 @@ class RecognitionModelInterface(ModelInterface):
             help='(transformer only) The type of positional encoding to use.')
         group.add_argument('--reset-symbols', type=str, default='+#-=×*()[]_POPUSH',
             help='(transformer with resettable encoding only) The symbols that reset the position.')
-        group.add_argument('--embedding-size', type=int, help='(hybrid_csg) Embedding size.')
+        group.add_argument('--embedding-size', type=int, help='(hybrid_csg) Embedding size for tokens.')
+        group.add_argument('--state-embedding-size', type=int, help='(hybrid_csg) Embedding size for states.')
         group.add_argument('--lba-hidden-size', type=int, default=40, help='(hybrid_csg) Hidden size for NeuralLBA.')
         group.add_argument('--lba-n-steps', type=int, default=100, help='(hybrid_csg) Number of steps for NeuralLBA.')
 
@@ -139,6 +151,7 @@ class RecognitionModelInterface(ModelInterface):
             add_ngram_head_n=getattr(args, 'add_ngram_head_n', 0),
             hybrid_base_architecture=getattr(args, 'hybrid_base_architecture', None),
             embedding_size=getattr(args, 'embedding_size', None),
+            state_embedding_size=getattr(args, 'state_embedding_size', None),
             num_layers=args.num_layers,
             d_model=args.d_model,
             num_heads=args.num_heads,
@@ -148,6 +161,7 @@ class RecognitionModelInterface(ModelInterface):
             use_language_modeling_head=args.use_language_modeling_head,
             use_next_symbols_head=args.use_next_symbols_head,
             input_vocabulary_size=len(input_vocab),
+            state_vocabulary_size=len(vocabulary_data['states']) if 'states' in vocabulary_data else 0,
             output_vocabulary_size=len(output_vocab) if uses_output_vocab else None,
             bos_index=input_vocab.bos_index if uses_bos else None,
             eos_index=output_vocab.eos_index if uses_output_vocab else None,
@@ -166,15 +180,16 @@ class RecognitionModelInterface(ModelInterface):
         else:
             return self._construct_standard_model(architecture=architecture, **kwargs)
 
-    def _construct_hybrid_model(self, hybrid_base_architecture, embedding_size, num_layers, dropout, d_model, num_heads, feedforward_size, hidden_units, input_vocabulary_size, lba_hidden_size, lba_n_steps, **kwargs):
+    def _construct_hybrid_model(self, hybrid_base_architecture, embedding_size, state_embedding_size, num_layers, dropout, d_model, num_heads, feedforward_size, hidden_units, input_vocabulary_size, state_vocabulary_size, lba_hidden_size, lba_n_steps, **kwargs):
         if hybrid_base_architecture is None: raise ValueError("For hybrid_csg, --hybrid-base-architecture must be specified.")
         if embedding_size is None: raise ValueError("For hybrid_csg, --embedding-size must be specified.")
+        if state_embedding_size is None: raise ValueError("For hybrid_csg, --state-embedding-size must be specified.")
         if dropout is None: raise ValueError("--dropout is required for hybrid_csg")
         if num_layers is None: raise ValueError("--num-layers is required for hybrid_csg")
         
         if hybrid_base_architecture == 'transformer':
             if d_model is None or num_heads is None or feedforward_size is None: raise ValueError("Transformer parameters are required for hybrid transformer.")
-            if embedding_size != d_model: raise ValueError("For hybrid transformer, --embedding-size must equal --d-model.")
+            if embedding_size + state_embedding_size != d_model: raise ValueError("For hybrid transformer, --embedding-size + --state-embedding-size must equal --d-model.")
             
             main_model = UnidirectionalTransformerEncoderLayers(
                 num_layers=num_layers, d_model=d_model, num_heads=num_heads,
@@ -186,14 +201,15 @@ class RecognitionModelInterface(ModelInterface):
             if hidden_units is None: raise ValueError("--hidden-units is required for hybrid RNN/LSTM.")
             
             RecurrentModel = SimpleRNN if hybrid_base_architecture == 'rnn' else LSTM
-            core = RecurrentModel(input_size=embedding_size, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
+            core = RecurrentModel(input_size=embedding_size + state_embedding_size, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
             main_model = core.main() @ DropoutUnidirectional(dropout)
             main_model_output_size = hidden_units
         else:
             raise ValueError(f"Unknown hybrid base architecture: {hybrid_base_architecture}")
 
         return HybridCSGModel(
-            input_vocabulary_size=input_vocabulary_size, embedding_size=embedding_size,
+            input_vocabulary_size=input_vocabulary_size, state_vocabulary_size=state_vocabulary_size,
+            embedding_size=embedding_size, state_embedding_size=state_embedding_size,
             main_model=main_model, main_model_output_size=main_model_output_size,
             lba_hidden_size=lba_hidden_size, lba_n_steps=lba_n_steps,
             device=self.get_device(None)
@@ -306,12 +322,18 @@ class RecognitionModelInterface(ModelInterface):
         else:
             padding_index = 0
             
-        full_tensor, last_index = pad_sequences(
-            [x[0] for x in batch], device,
+        token_full_tensor, last_index = pad_sequences(
+            [x[0]['tokens'] for x in batch], device,
             bos=self.bos_index, eos=self.eos_index,
             pad=padding_index, return_lengths=True
         )
-        input_tensor = full_tensor[:, :-1] if self.eos_index is not None else full_tensor
+        state_full_tensor, _ = pad_sequences(
+            [x[0]['states'] for x in batch], device,
+            bos=self.bos_index, eos=self.eos_index,
+            pad=padding_index, return_lengths=True
+        )
+        token_input_tensor = token_full_tensor[:, :-1] if self.eos_index is not None else token_full_tensor
+        state_input_tensor = state_full_tensor[:, :-1] if self.eos_index is not None else state_full_tensor
         
         recognition_expected_tensor = torch.tensor([x[1][0] for x in batch], device=device, dtype=torch.float)
         
@@ -323,7 +345,7 @@ class RecognitionModelInterface(ModelInterface):
 
         language_modeling_expected_tensor = None
         if self.use_language_modeling_head:
-            language_modeling_expected_tensor = full_tensor[:, 1:] if self.uses_bos else full_tensor
+            language_modeling_expected_tensor = token_full_tensor[:, 1:] if self.uses_bos else token_full_tensor
             language_modeling_expected_tensor = language_modeling_expected_tensor[positive_mask]
 
         next_symbols_expected_tensor = None
@@ -331,7 +353,7 @@ class RecognitionModelInterface(ModelInterface):
         if self.use_next_symbols_head:
             next_symbols_data = [x[1][1] for x in batch if x[1][1] is not None]
             num_positive_examples = len(next_symbols_data)
-            max_output_length = full_tensor.size(1) - int(self.uses_bos)
+            max_output_length = token_full_tensor.size(1) - int(self.uses_bos)
             next_symbols_expected_tensor = torch.zeros(
                 (num_positive_examples, max_output_length, self.output_vocabulary_size), device=device
             )
@@ -344,11 +366,11 @@ class RecognitionModelInterface(ModelInterface):
                 next_symbols_padding_mask[i, :len(next_symbol_set_list)] = 1
         
         if not self.uses_bos and padding_index == self.output_padding_index:
-            input_tensor = input_tensor.clone()
-            input_tensor[input_tensor == self.output_padding_index] = 0
+            token_input_tensor = token_input_tensor.clone()
+            token_input_tensor[token_input_tensor == self.output_padding_index] = 0
             
         return (
-            ModelInput(input_tensor, last_index, positive_mask, input_tensor),
+            ModelInput(token_input_tensor, state_input_tensor, last_index, positive_mask, token_input_tensor),
             (
                 recognition_expected_tensor,
                 language_modeling_expected_tensor,
@@ -375,6 +397,7 @@ class RecognitionModelInterface(ModelInterface):
         if self.architecture == 'hybrid_csg':
             return model(
                 model_input.input_sequence,
+                model_input.state_sequence,
                 last_index=model_input.last_index,
                 positive_mask=model_input.positive_mask
             )

@@ -49,8 +49,8 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
         
     return fst
 
-def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
-    """Annotates a list of tokens using the provided FST."""
+def annotate_string(tokens: list[str], annotator_fst: FST) -> list[tuple[str, str]]:
+    """Annotates a list of tokens using the provided FST, returning (token, state) pairs."""
     if not tokens:
         return []
     
@@ -68,36 +68,67 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     try:
         composed_fst = annotator_fst.compose(input_fsa)
         best_path = composed_fst.shortest_path()
-        return best_path.output_string if best_path else tokens
-    except Exception:
-        return tokens # Fallback to original tokens on error
+        
+        if best_path:
+            annotated_pairs = []
+            for arc in best_path.path: # best_path.path is a list of Arc objects
+                original_token = arc.input_symbol
+                annotated_token_str = arc.output_symbol
+                # Assuming format is {token}_{state}.
+                # If state name can contain '_', a more robust parsing or FST output format is needed.
+                parts = annotated_token_str.split('_', 1)
+                if len(parts) > 1:
+                    state_name = parts[1]
+                else:
+                    state_name = "UNK_STATE" # Fallback if parsing fails
+                annotated_pairs.append((original_token, state_name))
+            return annotated_pairs
+        else:
+            return [(token, "UNK_STATE") for token in tokens] # Fallback if no path found
+    except Exception as e:
+        print(f"Error during FST annotation: {e}", file=sys.stderr)
+        return [(token, "UNK_STATE") for token in tokens] # Fallback to original tokens and UNK_STATE on error
 
 def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
-    """Reads tokens, annotates them, and returns the set of unique annotated tokens."""
-    def generate_annotated_tokens():
+    """Reads tokens, annotates them, and returns the set of unique annotated tokens and state names."""
+    token_types = set()
+    state_types = set()
+    def generate_annotated_pairs():
         with path.open() as fin:
             for line in fin:
                 tokens = line.strip().split()
-                annotated_tokens = annotate_string(tokens, annotator_fst)
-                for token in annotated_tokens:
-                    yield token
-    return get_token_types(generate_annotated_tokens(), unk_string)
+                annotated_pairs = annotate_string(tokens, annotator_fst)
+                for token, state in annotated_pairs:
+                    yield token, state
+    
+    for token, state in generate_annotated_pairs():
+        token_types.add(token)
+        state_types.add(state)
 
-def prepare_annotated_file(vocab, annotator_fst, pair):
-    """Annotates strings in a file and saves them as integerized tensors."""
+    # Add UNK string if applicable
+    if unk_string:
+        token_types.add(unk_string)
+        state_types.add(unk_string) # Assuming UNK state is also possible
+
+    return sorted(list(token_types)), sorted(list(state_types))
+
+def prepare_annotated_file(token_vocab, state_vocab, pair, annotator):
+    """Annotates strings in a file and saves them as integerized tensors for tokens and states."""
     input_path, output_path = pair
-    print(f'preparing annotated tokens in {input_path} => {output_path}', file=sys.stderr)
+    print(f'preparing annotated tokens and states in {input_path} => {output_path}', file=sys.stderr)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    token_data = []
+    state_data = []
     with input_path.open() as fin:
-        data = []
         for line in fin:
             tokens = line.strip().split()
-            annotated_tokens = annotate_string(tokens, annotator_fst)
+            annotated_pairs = annotate_string(tokens, annotator)
             try:
-                data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
+                token_data.append(torch.tensor([token_vocab.to_int(t) for t, _ in annotated_pairs]))
+                state_data.append(torch.tensor([state_vocab.to_int(s) for _, s in annotated_pairs]))
             except KeyError as e:
-                raise ValueError(f'{input_path}: unknown token: {e}')
-        torch.save(data, output_path)
+                raise ValueError(f'{input_path}: unknown token or state: {e}')
+        torch.save({'tokens': token_data, 'states': state_data}, output_path)
 
 # --- Original Functions (from project) ---
 
@@ -206,35 +237,44 @@ def main():
     # Build vocabulary
     if args.use_next_symbols:
         token_types, has_unk = get_token_types_in_next_symbols_file(training_files[2][0], unk_string)
+        state_types = [] # No state types for next symbols
     elif annotator:
-        print("Building vocabulary from annotated tokens...")
-        token_types, has_unk = get_annotated_token_types_in_file(training_files[0][0], unk_string, annotator)
+        print("Building vocabulary from annotated tokens and states...")
+        token_types, state_types = get_annotated_token_types_in_file(training_files[0][0], unk_string, annotator)
+        has_unk = unk_string in token_types or unk_string in state_types
     else:
         token_types, has_unk = get_token_types_in_file(training_files[0][0], unk_string)
+        state_types = [] # No state types without annotator
     
     allow_unk = (args.always_allow_unk or has_unk) and not args.never_allow_unk
-    tokens = sorted(token_types)
-    vocab = build_softmax_vocab(tokens, allow_unk, ToIntVocabularyBuilder())
-    eos_index = build_softmax_vocab(tokens, allow_unk, ToStringVocabularyBuilder()).eos_index
+    
+    token_vocab = build_softmax_vocab(token_types, allow_unk, ToIntVocabularyBuilder())
+    state_vocab = build_softmax_vocab(state_types, allow_unk, ToIntVocabularyBuilder()) if state_types else None
+    eos_index = build_softmax_vocab(token_types, allow_unk, ToStringVocabularyBuilder()).eos_index
 
     # Save vocabulary
     vocab_output_file = args.training_data / 'main.vocab'
-    print(f'vocabulary size: {len(vocab)}', file=sys.stderr)
+    print(f'token vocabulary size: {len(token_vocab)}', file=sys.stderr)
+    if state_vocab:
+        print(f'state vocabulary size: {len(state_vocab)}', file=sys.stderr)
     if not args.only_more_data:
         print(f'writing {vocab_output_file}', file=sys.stderr)
         vocab_output_file.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({'tokens': tokens, 'allow_unk': allow_unk}, vocab_output_file)
+        vocab_data = {'tokens': token_types, 'allow_unk': allow_unk}
+        if state_types:
+            vocab_data['states'] = state_types
+        torch.save(vocab_data, vocab_output_file)
 
     # Prepare all specified datasets
     for strings_files, labels_files, next_symbols_files in prepared_files:
         if annotator:
-            prepare_annotated_file(vocab, annotator, strings_files)
+            prepare_annotated_file(token_vocab, state_vocab, strings_files, annotator)
         else:
-            prepare_file(vocab, strings_files)
+            prepare_file(token_vocab, strings_files)
         
         prepare_labels_file(labels_files)
         if args.use_next_symbols:
-            prepare_valid_symbols_file(vocab, eos_index, next_symbols_files)
+            prepare_valid_symbols_file(token_vocab, eos_index, next_symbols_files)
 
 if __name__ == '__main__':
     main()
