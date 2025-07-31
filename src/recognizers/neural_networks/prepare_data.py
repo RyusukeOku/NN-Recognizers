@@ -116,9 +116,10 @@ def prepare_states_file(annotator_fst, strings_pair, states_pair):
                     if isinstance(s, State):
                         materialized_state_ids.append(s.idx)
                     elif hasattr(s, '__iter__') and not isinstance(s, (str, bytes)):
-                        if not s:
+                        try:
+                            item = next(iter(s))
+                        except StopIteration:
                             continue
-                        item = next(iter(s))
                         if isinstance(item, State):
                             materialized_state_ids.append(item.idx)
                         elif isinstance(item, tuple):
