@@ -111,7 +111,7 @@ class RecognitionTrainingLoop(TrainingLoop[
         loss_terms = get_loss_terms(
             model,
             model_interface,
-            prepared_batch,
+            *prepared_batch,
             numerator_reduction='none',
             denominator_reduction='sum',
             label_smoothing_factor=self.label_smoothing_factor,

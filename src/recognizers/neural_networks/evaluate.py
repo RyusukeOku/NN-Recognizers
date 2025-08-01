@@ -18,14 +18,34 @@ def evaluate(model, model_interface, batches, num_examples):
     device = model_interface.get_device(None)
     example_scores = [None] * num_examples
     model.eval()
+    
+    tp, fp, fn, tn = 0, 0, 0, 0
+
     with torch.inference_mode():
         for indexed_batch in batches:
             batch = [(x, d) for x, (i, d) in indexed_batch]
-            prepared_batch = model_interface.prepare_batch(batch, device)
+            prepared_batch, expected_outputs = model_interface.prepare_batch(batch, device)
+            
+            # Get logits from the model
+            logits, _, _ = model_interface.get_logits(model, prepared_batch)
+            
+            # Calculate probabilities
+            probabilities = torch.sigmoid(logits)
+            predictions = (probabilities >= 0.5).long()
+            
+            # Get true labels
+            labels = expected_outputs[0].long()
+            
+            # Update confusion matrix
+            tp += ((predictions == 1) & (labels == 1)).sum().item()
+            fp += ((predictions == 1) & (labels == 0)).sum().item()
+            fn += ((predictions == 0) & (labels == 1)).sum().item()
+            tn += ((predictions == 0) & (labels == 0)).sum().item()
+
             batch_score_dict = get_loss_terms(
                 model,
                 model_interface,
-                prepared_batch,
+                (prepared_batch, expected_outputs),
                 numerator_reduction='none',
                 denominator_reduction='none',
                 label_smoothing_factor=0.0,
@@ -34,7 +54,8 @@ def evaluate(model, model_interface, batches, num_examples):
             example_score_dicts = split_score_dict(batch, batch_score_dict)
             for (x, (i, d)), example_score_dict in zip(indexed_batch, example_score_dicts):
                 example_scores[i] = example_score_dict
-    return example_scores
+    
+    return example_scores, (tp, fp, fn, tn)
 
 class DictScoreAccumulator:
 
@@ -117,7 +138,28 @@ def main():
         )
         examples = [(x, (i, d)) for i, (x, d) in enumerate(examples)]
         batches = generate_batches(examples, args.batching_max_tokens)
-        scores = evaluate(saver.model, model_interface, batches, len(examples))
+        scores, (tp, fp, fn, tn) = evaluate(saver.model, model_interface, batches, len(examples))
+        
+        # Calculate rates
+        fp_rate = fp / (fp + tn) if (fp + tn) > 0 else 0
+        fn_rate = fn / (fn + tp) if (fn + tp) > 0 else 0
+        
+        # Prepare report
+        classification_report = {
+            'true_positives': tp,
+            'false_positives': fp,
+            'false_negatives': fn,
+            'true_negatives': tn,
+            'false_positive_rate': fp_rate,
+            'false_negative_rate': fn_rate
+        }
+        
+        # Save classification report
+        report_path = args.output / f'{dataset}_classification_report.json'
+        print(f'writing {report_path}')
+        with report_path.open('w') as f:
+            json.dump(classification_report, f, indent=2)
+
         accumulator = DictScoreAccumulator()
         example_scores_path = args.output / f'{dataset}.jsonl'
         print(f'writing {example_scores_path}')
