@@ -1,4 +1,3 @@
-
 import argparse
 import json
 import pathlib
@@ -6,10 +5,8 @@ import sys
 import torch
 
 # Imports for FST annotation
-from rayuela.fsa.fsa import FSA
 from rayuela.fsa.fst import FST
 from rayuela.base.semiring import Tropical, Real
-from collections import defaultdict
 
 from rau.tasks.common.data_preparation import (
     add_prepare_data_args,
@@ -49,99 +46,37 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
         
     return fst
 
-def find_shortest_path(fst: FST, target_states: set) -> list[str] | None:
-    """
-    Finds the shortest path in an FST to one of the target states
-    using a Viterbi-like algorithm.
-    """
-    if not issubclass(fst.R, Tropical):
-        raise TypeError("Shortest path finding requires a Tropical semiring.")
-
-    dist = defaultdict(lambda: fst.R.zero)
-    backpointer = {}
-
-    initial_state = next(iter(fst.I), None)
-    if initial_state is None:
-        return None
-    dist[initial_state] = fst.R.one
-
-    try:
-        queue = fst.toposort()
-    except Exception:
-        queue = sorted(list(fst.Q))
-
-    for p in queue:
-        if dist[p] == fst.R.zero:
-            continue
-        for i, o, q, w in fst.arcs(p):
-            new_dist = dist[p] * w
-            if new_dist < dist[q]:
-                dist[q] = new_dist
-                backpointer[q] = (p, o)
-
-    best_target_state = None
-    min_dist = fst.R.zero
-
-    for t_state in target_states:
-        path_weight = dist[t_state]
-        if path_weight < fst.R.zero: # If the state is reachable
-            if best_target_state is None or path_weight < min_dist:
-                min_dist = path_weight
-                best_target_state = t_state
-
-    if best_target_state is None:
-        return None
-
-    path = []
-    curr = best_target_state
-    while curr in backpointer:
-        prev, output_sym = backpointer[curr]
-        path.append(output_sym)
-        curr = prev
-    
-    path.reverse()
-    return path
-
 def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
-    """Annotates a list of tokens using the provided FST."""
+    """
+    Annotates a list of tokens by simulating a run on the annotator FST.
+    """
     if not tokens:
         return []
+
+    annotated_tokens = []
     
-    input_fsa = FSA(R=annotator_fst.R)
-    num_states = len(tokens) + 1
-    for i in range(num_states):
-        input_fsa.add_state(i)
-    input_fsa.set_I(0)
-    input_fsa.add_F(num_states - 1, annotator_fst.R(0.0))
+    current_state = next(iter(annotator_fst.I), None)
+    if current_state is None:
+        print("ERROR: Annotator FST has no initial state.", file=sys.stderr)
+        return tokens # Fallback
 
-    for i, token in enumerate(tokens):
-        input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
-    
-    input_fst = FST(R=input_fsa.R)
-    for state in input_fsa.Q:
-        input_fst.add_state(state)
-    input_fst.set_I(next(iter(input_fsa.I)))
-    for final_state, weight in input_fsa.F:
-        input_fst.add_F(final_state, weight)
-    for p in input_fsa.Q:
-        for i, q, w in input_fsa.arcs(p):
-            input_fst.add_arc(p, i, i, q, w)
-
-    try:
-        composed_fst = input_fst.compose(annotator_fst)
+    for token in tokens:
+        found_arc = False
+        # Find the arc for the current token from the current state
+        for i, o, q, w in annotator_fst.arcs(current_state):
+            if i == token:
+                annotated_tokens.append(o)
+                current_state = q
+                found_arc = True
+                break
         
-        # Define target states: any composed state where the input_fst part is final
-        target_states = {q for q in composed_fst.Q if q[0] in input_fst.F}
-
-        shortest_path_tokens = find_shortest_path(composed_fst, target_states)
-        
-        if shortest_path_tokens is None:
+        if not found_arc:
+            # If no arc matches the token, something is wrong (e.g., token not in alphabet)
+            # Fallback to original tokens for the rest of the string.
+            print(f"WARNING: No transition found for token '{token}' from state '{current_state}'.", file=sys.stderr)
             return tokens
-        return shortest_path_tokens
 
-    except Exception as e:
-        print(f"ERROR: Exception during FST processing for tokens '{tokens}': {e}", file=sys.stderr)
-        return tokens
+    return annotated_tokens
 
 def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
     """Reads tokens, annotates them, and returns the set of unique annotated tokens."""
