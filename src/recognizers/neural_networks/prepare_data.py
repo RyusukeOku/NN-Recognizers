@@ -1,3 +1,5 @@
+
+
 import argparse
 import json
 import pathlib
@@ -65,10 +67,13 @@ def find_shortest_path(fst: FST) -> list[str] | None:
         return None
     dist[initial_state] = fst.R.one
 
-    # Viterbi forward pass
-    # Note: This assumes the FST is acyclic. For cyclic graphs, more complex algorithms are needed.
-    # We rely on the composed FST being a linear chain.
-    queue = sorted(list(fst.Q)) # A simple way to process states in some order
+    # Viterbi forward pass using topological sort
+    try:
+        queue = fst.toposort()
+    except Exception as e:
+        # Fallback for potential cycles, though compose should be acyclic
+        print(f"DEBUG: fst.toposort() failed with {e}. Falling back to simple sort.", file=sys.stderr)
+        queue = sorted(list(fst.Q))
 
     for p in queue:
         if dist[p] == fst.R.zero:
@@ -85,9 +90,10 @@ def find_shortest_path(fst: FST) -> list[str] | None:
 
     for f_state in fst.F:
         final_weight = dist[f_state] * fst.F[f_state]
-        if best_final_state is None or final_weight < min_dist:
-            min_dist = final_weight
-            best_final_state = f_state
+        if final_weight < fst.R.zero:
+            if best_final_state is None or final_weight < min_dist:
+                min_dist = final_weight
+                best_final_state = f_state
 
     if best_final_state is None:
         return None
