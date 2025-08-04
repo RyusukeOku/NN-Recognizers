@@ -1,3 +1,4 @@
+
 import argparse
 import json
 import pathlib
@@ -55,10 +56,12 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
 
     annotated_tokens = []
     
-    current_state = next(iter(annotator_fst.I), None)
-    if current_state is None:
+    # Correctly extract the state ID from the (state, weight) tuple
+    initial_state_tuple = next(iter(annotator_fst.I), None)
+    if initial_state_tuple is None:
         print("ERROR: Annotator FST has no initial state.", file=sys.stderr)
         return tokens # Fallback
+    current_state = initial_state_tuple[0]
 
     for token in tokens:
         found_arc = False
