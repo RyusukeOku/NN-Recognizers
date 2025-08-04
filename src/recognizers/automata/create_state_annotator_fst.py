@@ -1,4 +1,3 @@
-
 import argparse
 import sys
 import torch
@@ -45,8 +44,14 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alp
     # Build the serializable data dictionary for the annotator FST
     print("Extracting data to build FST...")
     states = list(fsa.Q)
-    initial_state = next(fsa.I, None)
-    final_states = list(fsa.F)
+    
+    # Extract only the state from the (state, weight) tuple
+    initial_state_tuple = next(fsa.I, None)
+    initial_state = initial_state_tuple[0] if initial_state_tuple else None
+
+    # Extract only the states from the (state, weight) tuples
+    final_states = [s for s, w in fsa.F.items()]
+
     arcs = []
     for p in states:
         for i, q, w in fsa.arcs(p):
