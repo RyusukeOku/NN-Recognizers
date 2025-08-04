@@ -1,3 +1,4 @@
+
 import argparse
 import sys
 import torch
@@ -50,7 +51,7 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alp
     initial_state = initial_state_tuple[0] if initial_state_tuple else None
 
     # Extract only the states from the (state, weight) tuples
-    final_states = [s for s, w in fsa.F.items()]
+    final_states = [s for s, w in fsa.F]
 
     arcs = []
     for p in states:
@@ -62,7 +63,7 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alp
             arcs.append((p, i, output_label, q, w.value))
 
     fst_data = {
-        'states': states,
+        'states': list(set(states)), # Use set to remove duplicates
         'initial_state': initial_state,
         'final_states': final_states,
         'arcs': arcs,
@@ -90,3 +91,4 @@ if __name__ == '__main__':
         explicit_alphabet_list = args.alphabet.split(',')
 
     create_state_annotator_fst_from_pt(args.automaton_pt_path, args.output_fst_path, explicit_alphabet_list)
+
