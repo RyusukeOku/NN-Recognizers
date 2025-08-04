@@ -1,4 +1,3 @@
-
 import argparse
 import json
 import pathlib
@@ -130,8 +129,17 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
             input_fst.add_arc(p, i, i, q, w)
 
     try:
-        # Corrected compose order: input.compose(annotator)
-        composed_fst = input_fst.compose(annotator_fst)
+        # Create a temporary copy of the annotator FST
+        temp_annotator = annotator_fst.copy()
+        
+        # Make all states in the temporary annotator final.
+        # This ensures that a path is found for any string that can be processed,
+        # regardless of whether it's accepted by the original automaton.
+        for q in temp_annotator.Q:
+            temp_annotator.add_F(q, temp_annotator.R.one)
+
+        # Corrected compose order with the temporary annotator
+        composed_fst = input_fst.compose(temp_annotator)
         
         shortest_path_tokens = find_shortest_path(composed_fst)
         
