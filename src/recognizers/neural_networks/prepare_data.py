@@ -1,3 +1,4 @@
+
 import argparse
 import json
 import pathlib
@@ -48,9 +49,11 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
         
     return fst
 
-def find_shortest_path(fst: FST) -> list[str] | None:
-    """Finds the shortest path in an FST using a Viterbi-like algorithm."""
-    
+def find_shortest_path(fst: FST, target_states: set) -> list[str] | None:
+    """
+    Finds the shortest path in an FST to one of the target states
+    using a Viterbi-like algorithm.
+    """
     if not issubclass(fst.R, Tropical):
         raise TypeError("Shortest path finding requires a Tropical semiring.")
 
@@ -76,25 +79,21 @@ def find_shortest_path(fst: FST) -> list[str] | None:
                 dist[q] = new_dist
                 backpointer[q] = (p, o)
 
-    best_final_state = None
+    best_target_state = None
     min_dist = fst.R.zero
 
-    final_states_with_weights = list(fst.F)
-    if not final_states_with_weights:
-        return None
+    for t_state in target_states:
+        path_weight = dist[t_state]
+        if path_weight < fst.R.zero: # If the state is reachable
+            if best_target_state is None or path_weight < min_dist:
+                min_dist = path_weight
+                best_target_state = t_state
 
-    for f_state, f_weight in final_states_with_weights:
-        final_path_weight = dist[f_state] * f_weight
-        if final_path_weight < fst.R.zero:
-            if best_final_state is None or final_path_weight < min_dist:
-                min_dist = final_path_weight
-                best_final_state = f_state
-
-    if best_final_state is None:
+    if best_target_state is None:
         return None
 
     path = []
-    curr = best_final_state
+    curr = best_target_state
     while curr in backpointer:
         prev, output_sym = backpointer[curr]
         path.append(output_sym)
@@ -129,22 +128,15 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
             input_fst.add_arc(p, i, i, q, w)
 
     try:
-        # Create a temporary copy of the annotator FST
-        temp_annotator = annotator_fst.copy()
+        composed_fst = input_fst.compose(annotator_fst)
         
-        # Make all states in the temporary annotator final.
-        # This ensures that a path is found for any string that can be processed,
-        # regardless of whether it's accepted by the original automaton.
-        for q in temp_annotator.Q:
-            temp_annotator.add_F(q, temp_annotator.R.one)
+        # Define target states: any composed state where the input_fst part is final
+        target_states = {q for q in composed_fst.Q if q[0] in input_fst.F}
 
-        # Corrected compose order with the temporary annotator
-        composed_fst = input_fst.compose(temp_annotator)
-        
-        shortest_path_tokens = find_shortest_path(composed_fst)
+        shortest_path_tokens = find_shortest_path(composed_fst, target_states)
         
         if shortest_path_tokens is None:
-            return tokens # Fallback if no path is found
+            return tokens
         return shortest_path_tokens
 
     except Exception as e:
@@ -175,7 +167,7 @@ def prepare_annotated_file(vocab, annotator_fst, pair, text_output_file=None):
             if text_output_file:
                 text_output_file.write(' '.join(annotated_tokens) + '\n')
             try:
-                data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
+                data.append([vocab.to_int(t) for t in annotated_tokens])
             except KeyError as e:
                 raise ValueError(f'{input_path}: unknown token: {e}')
         torch.save(data, output_path)
