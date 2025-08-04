@@ -1,5 +1,3 @@
-
-
 import argparse
 import json
 import pathlib
@@ -66,8 +64,17 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     for i, token in enumerate(tokens):
         input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
     
-    # Convert the input FSA to an FST before composition
-    input_fst = FST.from_fsa(input_fsa)
+    # Manually convert the input FSA to an FST for composition
+    input_fst = FST(R=input_fsa.R)
+    for q in input_fsa.Q:
+        input_fst.add_state(q)
+    input_fst.set_I(next(iter(input_fsa.I)))
+    for q, w in input_fsa.F.items():
+        input_fst.add_F(q, w)
+    
+    for p in input_fsa.Q:
+        for i, q, w in input_fsa.arcs(p):
+            input_fst.add_arc(p, i, i, q, w) # input and output symbols are the same
 
     try:
         composed_fst = annotator_fst.compose(input_fst)
