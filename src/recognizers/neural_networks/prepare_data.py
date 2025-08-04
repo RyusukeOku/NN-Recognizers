@@ -1,3 +1,5 @@
+
+
 import argparse
 import json
 import pathlib
@@ -64,8 +66,11 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     for i, token in enumerate(tokens):
         input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
     
+    # Convert the input FSA to an FST before composition
+    input_fst = FST.from_fsa(input_fsa)
+
     try:
-        composed_fst = annotator_fst.compose(input_fsa)
+        composed_fst = annotator_fst.compose(input_fst)
         best_path = composed_fst.shortest_path()
         if not best_path:
             print(f"DEBUG: No shortest path found for tokens: {tokens}", file=sys.stderr)
