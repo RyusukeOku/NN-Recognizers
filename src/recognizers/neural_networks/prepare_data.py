@@ -1,4 +1,3 @@
-
 import argparse
 import json
 import pathlib
@@ -83,7 +82,7 @@ def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
                     yield token
     return get_token_types(generate_annotated_tokens(), unk_string)
 
-def prepare_annotated_file(vocab, annotator_fst, pair):
+def prepare_annotated_file(vocab, annotator_fst, pair, text_output_file=None):
     """Annotates strings in a file and saves them as integerized tensors."""
     input_path, output_path = pair
     print(f'preparing annotated tokens in {input_path} => {output_path}', file=sys.stderr)
@@ -93,6 +92,8 @@ def prepare_annotated_file(vocab, annotator_fst, pair):
         for line in fin:
             tokens = line.strip().split()
             annotated_tokens = annotate_string(tokens, annotator_fst)
+            if text_output_file:
+                text_output_file.write(' '.join(annotated_tokens) + '\n')
             try:
                 data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
             except KeyError as e:
@@ -176,6 +177,7 @@ def main():
     # Add arguments for FST annotation
     parser.add_argument('--use-state-annotations', action='store_true', help='Enable FST-based state annotations.')
     parser.add_argument('--fst-annotator-path', type=pathlib.Path, help='Path to the FST data file for annotation.')
+    parser.add_argument('--annotated-text-output-path', type=pathlib.Path, help='Path to save the annotated tokens in text format for inspection.')
 
     add_prepare_data_args(parser)
     args = parser.parse_args()
@@ -226,15 +228,24 @@ def main():
         torch.save({'tokens': tokens, 'allow_unk': allow_unk}, vocab_output_file)
 
     # Prepare all specified datasets
+    annotated_text_output_file = None
+    if args.annotated_text_output_path:
+        args.annotated_text_output_path.parent.mkdir(parents=True, exist_ok=True)
+        annotated_text_output_file = args.annotated_text_output_path.open('w')
+
     for strings_files, labels_files, next_symbols_files in prepared_files:
         if annotator:
-            prepare_annotated_file(vocab, annotator, strings_files)
+            prepare_annotated_file(vocab, annotator, strings_files, annotated_text_output_file)
         else:
             prepare_file(vocab, strings_files)
         
         prepare_labels_file(labels_files)
         if args.use_next_symbols:
             prepare_valid_symbols_file(vocab, eos_index, next_symbols_files)
+    
+    if annotated_text_output_file:
+        annotated_text_output_file.close()
+
 
 if __name__ == '__main__':
     main()
