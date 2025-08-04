@@ -1,4 +1,3 @@
-
 import argparse
 import json
 import pathlib
@@ -10,6 +9,7 @@ import torch
 from rayuela.fsa.fsa import FSA
 from rayuela.fsa.fst import FST
 from rayuela.base.semiring import Tropical, Real
+from collections import defaultdict
 
 from rau.tasks.common.data_preparation import (
     add_prepare_data_args,
@@ -49,6 +49,60 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
         
     return fst
 
+def find_shortest_path(fst: FST) -> list[str] | None:
+    """Finds the shortest path in an FST using a Viterbi-like algorithm."""
+    
+    # Assumes Tropical semiring for shortest path
+    if not issubclass(fst.R, Tropical):
+        raise TypeError("Shortest path finding requires a Tropical semiring.")
+
+    dist = defaultdict(lambda: fst.R.zero)
+    backpointer = {}
+
+    # Initialization
+    initial_state = next(iter(fst.I), None)
+    if initial_state is None:
+        return None
+    dist[initial_state] = fst.R.one
+
+    # Viterbi forward pass
+    # Note: This assumes the FST is acyclic. For cyclic graphs, more complex algorithms are needed.
+    # We rely on the composed FST being a linear chain.
+    queue = sorted(list(fst.Q)) # A simple way to process states in some order
+
+    for p in queue:
+        if dist[p] == fst.R.zero:
+            continue
+        for i, o, q, w in fst.arcs(p):
+            new_dist = dist[p] * w
+            if new_dist < dist[q]:
+                dist[q] = new_dist
+                backpointer[q] = (p, o)
+
+    # Find the best final state
+    best_final_state = None
+    min_dist = fst.R.zero
+
+    for f_state in fst.F:
+        final_weight = dist[f_state] * fst.F[f_state]
+        if best_final_state is None or final_weight < min_dist:
+            min_dist = final_weight
+            best_final_state = f_state
+
+    if best_final_state is None:
+        return None
+
+    # Backtracking
+    path = []
+    curr = best_final_state
+    while curr in backpointer:
+        prev, output_sym = backpointer[curr]
+        path.append(output_sym)
+        curr = prev
+    
+    path.reverse()
+    return path
+
 def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     """Annotates a list of tokens using the provided FST."""
     if not tokens:
@@ -60,7 +114,7 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     for i in range(num_states):
         input_fsa.add_state(i)
     input_fsa.set_I(0)
-    input_fsa.add_F(num_states - 1, annotator_fst.R(0.0)) # Add final state with appropriate weight
+    input_fsa.add_F(num_states - 1, annotator_fst.R(0.0))
 
     for i, token in enumerate(tokens):
         input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
@@ -69,23 +123,22 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     input_fst = FST(R=input_fsa.R)
     for state in input_fsa.Q:
         input_fst.add_state(state)
-    
     input_fst.set_I(next(iter(input_fsa.I)))
-
     for final_state in input_fsa.F:
         input_fst.add_F(final_state, input_fsa.R(0.0))
-
     for p in input_fsa.Q:
         for i, q, w in input_fsa.arcs(p):
-            input_fst.add_arc(p, i, i, q, w) # input and output symbols are the same
+            input_fst.add_arc(p, i, i, q, w)
 
     try:
         composed_fst = annotator_fst.compose(input_fst)
-        best_path = composed_fst.shortest_path()
-        if not best_path:
+        shortest_path_tokens = find_shortest_path(composed_fst)
+        
+        if shortest_path_tokens is None:
             print(f"DEBUG: No shortest path found for tokens: {tokens}", file=sys.stderr)
             return tokens
-        return best_path.output_string
+        return shortest_path_tokens
+
     except Exception as e:
         print(f"ERROR: Exception during FST processing for tokens '{tokens}': {e}", file=sys.stderr)
         return tokens # Fallback to original tokens on error
