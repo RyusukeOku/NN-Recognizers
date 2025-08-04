@@ -1,3 +1,4 @@
+
 import argparse
 import json
 import pathlib
@@ -92,7 +93,9 @@ def prepare_annotated_file(vocab, annotator_fst, pair, text_output_file=None):
         for line in fin:
             tokens = line.strip().split()
             annotated_tokens = annotate_string(tokens, annotator_fst)
+            print(f"DEBUG: Annotated tokens: {' '.join(annotated_tokens)}", file=sys.stderr)
             if text_output_file:
+                print("DEBUG: Writing to text output file.", file=sys.stderr)
                 text_output_file.write(' '.join(annotated_tokens) + '\n')
             try:
                 data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
@@ -191,10 +194,10 @@ def main():
     # Load and reconstruct annotator FST if needed
     annotator = None
     if args.use_state_annotations:
-        print("Loading and reconstructing FST annotator...")
+        print("Loading and reconstructing FST annotator...", file=sys.stderr)
         fst_data = torch.load(args.fst_annotator_path, weights_only=False)
         annotator = reconstruct_fst_from_data(fst_data)
-        print("FST annotator ready.")
+        print("FST annotator ready.", file=sys.stderr)
 
     training_files = get_file_names_from_directory(args.training_data, args.use_next_symbols)
     prepared_files = []
@@ -209,7 +212,7 @@ def main():
     if args.use_next_symbols:
         token_types, has_unk = get_token_types_in_next_symbols_file(training_files[2][0], unk_string)
     elif annotator:
-        print("Building vocabulary from annotated tokens...")
+        print("Building vocabulary from annotated tokens...", file=sys.stderr)
         token_types, has_unk = get_annotated_token_types_in_file(training_files[0][0], unk_string, annotator)
     else:
         token_types, has_unk = get_token_types_in_file(training_files[0][0], unk_string)
@@ -230,11 +233,14 @@ def main():
     # Prepare all specified datasets
     annotated_text_output_file = None
     if args.annotated_text_output_path:
+        print(f"DEBUG: Opening {args.annotated_text_output_path} for writing.", file=sys.stderr)
         args.annotated_text_output_path.parent.mkdir(parents=True, exist_ok=True)
         annotated_text_output_file = args.annotated_text_output_path.open('w')
 
     for strings_files, labels_files, next_symbols_files in prepared_files:
+        print(f"DEBUG: Processing file pair: {strings_files}", file=sys.stderr)
         if annotator:
+            print("DEBUG: Annotator is enabled. Calling prepare_annotated_file.", file=sys.stderr)
             prepare_annotated_file(vocab, annotator, strings_files, annotated_text_output_file)
         else:
             prepare_file(vocab, strings_files)
@@ -244,6 +250,7 @@ def main():
             prepare_valid_symbols_file(vocab, eos_index, next_symbols_files)
     
     if annotated_text_output_file:
+        print(f"DEBUG: Closing {args.annotated_text_output_path}.", file=sys.stderr)
         annotated_text_output_file.close()
 
 
