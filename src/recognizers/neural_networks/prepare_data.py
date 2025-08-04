@@ -1,4 +1,3 @@
-
 import argparse
 import json
 import pathlib
@@ -56,26 +55,26 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
 
     annotated_tokens = []
     
-    # Correctly extract the state ID from the (state, weight) tuple
     initial_state_tuple = next(iter(annotator_fst.I), None)
     if initial_state_tuple is None:
         print("ERROR: Annotator FST has no initial state.", file=sys.stderr)
-        return tokens # Fallback
+        return tokens
     current_state = initial_state_tuple[0]
 
     for token in tokens:
         found_arc = False
-        # Find the arc for the current token from the current state
-        for i, o, q, w in annotator_fst.arcs(current_state):
-            if i == token:
-                annotated_tokens.append(o)
-                current_state = q
-                found_arc = True
-                break
+        # Access the arcs dictionary directly for the current state
+        if current_state in annotator_fst.δ:
+            for (input_sym, output_sym), transitions in annotator_fst.δ[current_state].items():
+                if input_sym == token:
+                    annotated_tokens.append(output_sym)
+                    # Assuming one transition per symbol for deterministic annotation
+                    next_state, _ = next(iter(transitions.items()))
+                    current_state = next_state
+                    found_arc = True
+                    break
         
         if not found_arc:
-            # If no arc matches the token, something is wrong (e.g., token not in alphabet)
-            # Fallback to original tokens for the rest of the string.
             print(f"WARNING: No transition found for token '{token}' from state '{current_state}'.", file=sys.stderr)
             return tokens
 
