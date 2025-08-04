@@ -1,10 +1,7 @@
-
-
 import argparse
 import json
 import pathlib
 import sys
-
 import torch
 
 # Imports for FST annotation
@@ -54,25 +51,23 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
 def find_shortest_path(fst: FST) -> list[str] | None:
     """Finds the shortest path in an FST using a Viterbi-like algorithm."""
     
-    # Assumes Tropical semiring for shortest path
     if not issubclass(fst.R, Tropical):
         raise TypeError("Shortest path finding requires a Tropical semiring.")
 
     dist = defaultdict(lambda: fst.R.zero)
     backpointer = {}
 
-    # Initialization
     initial_state = next(iter(fst.I), None)
     if initial_state is None:
+        print("DEBUG: find_shortest_path: FST has no initial state.", file=sys.stderr)
         return None
     dist[initial_state] = fst.R.one
 
-    # Viterbi forward pass using topological sort
     try:
         queue = fst.toposort()
     except Exception as e:
-        # Fallback for potential cycles, though compose should be acyclic
-        print(f"DEBUG: fst.toposort() failed with {e}. Falling back to simple sort.", file=sys.stderr)
+        print(f"DEBUG: fst.toposort() failed with {e}. This may indicate a cycle.", file=sys.stderr)
+        # In case of cycles, a simple sorted list is not guaranteed to work, but it's a fallback.
         queue = sorted(list(fst.Q))
 
     for p in queue:
@@ -84,21 +79,29 @@ def find_shortest_path(fst: FST) -> list[str] | None:
                 dist[q] = new_dist
                 backpointer[q] = (p, o)
 
-    # Find the best final state
     best_final_state = None
     min_dist = fst.R.zero
 
-    for f_state in fst.F:
-        final_weight = dist[f_state] * fst.F[f_state]
-        if final_weight < fst.R.zero:
-            if best_final_state is None or final_weight < min_dist:
-                min_dist = final_weight
+    final_states_with_weights = list(fst.F)
+    if not final_states_with_weights:
+        print("DEBUG: find_shortest_path: FST has no final states.", file=sys.stderr)
+        return None
+
+    for f_state, f_weight in final_states_with_weights:
+        final_path_weight = dist[f_state] * f_weight
+        if final_path_weight < fst.R.zero:
+            if best_final_state is None or final_path_weight < min_dist:
+                min_dist = final_path_weight
                 best_final_state = f_state
 
     if best_final_state is None:
+        # This is the core of the problem. Let's print the state of dist.
+        reachable_states = {s for s, d in dist.items() if d < fst.R.zero}
+        print(f"DEBUG: find_shortest_path: No path found to any final state.", file=sys.stderr)
+        print(f"DEBUG: Reachable states from initial state: {reachable_states}", file=sys.stderr)
+        print(f"DEBUG: FST's final states: {[s for s,w in final_states_with_weights]}", file=sys.stderr)
         return None
 
-    # Backtracking
     path = []
     curr = best_final_state
     while curr in backpointer:
@@ -114,7 +117,6 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     if not tokens:
         return []
     
-    # Manually construct a linear FSA from the input tokens
     input_fsa = FSA(R=annotator_fst.R)
     num_states = len(tokens) + 1
     for i in range(num_states):
@@ -125,32 +127,45 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     for i, token in enumerate(tokens):
         input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
     
-    # Manually convert the input FSA to an FST for composition
     input_fst = FST(R=input_fsa.R)
     for state in input_fsa.Q:
         input_fst.add_state(state)
     input_fst.set_I(next(iter(input_fsa.I)))
-    for final_state in input_fsa.F:
-        input_fst.add_F(final_state, input_fsa.R(0.0))
+    for final_state, weight in input_fsa.F:
+        input_fst.add_F(final_state, weight)
     for p in input_fsa.Q:
         for i, q, w in input_fsa.arcs(p):
             input_fst.add_arc(p, i, i, q, w)
 
     try:
         composed_fst = annotator_fst.compose(input_fst)
+        
+        # ------------------- FINAL DEBUG BLOCK -------------------
+        if tokens == ['1', '0']: # Let's inspect the FST for a known failing case
+            print("\n" + "="*20, file=sys.stderr)
+            print(f"DEBUG: Inspecting composed_fst for tokens: {tokens}", file=sys.stderr)
+            print(f"DEBUG: Composed FST states: {list(composed_fst.Q)}", file=sys.stderr)
+            print(f"DEBUG: Composed FST initial state: {next(iter(composed_fst.I), None)}", file=sys.stderr)
+            print(f"DEBUG: Composed FST final states: {list(composed_fst.F)}", file=sys.stderr)
+            all_arcs = []
+            for p in composed_fst.Q:
+                for arc in composed_fst.arcs(p):
+                    all_arcs.append((p, arc))
+            print(f"DEBUG: Composed FST arcs: {all_arcs}", file=sys.stderr)
+            print("="*20 + "\n", file=sys.stderr)
+        # ---------------------------------------------------------
+
         shortest_path_tokens = find_shortest_path(composed_fst)
         
         if shortest_path_tokens is None:
-            print(f"DEBUG: No shortest path found for tokens: {tokens}", file=sys.stderr)
             return tokens
         return shortest_path_tokens
 
     except Exception as e:
         print(f"ERROR: Exception during FST processing for tokens '{tokens}': {e}", file=sys.stderr)
-        return tokens # Fallback to original tokens on error
+        return tokens
 
 def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
-    """Reads tokens, annotates them, and returns the set of unique annotated tokens."""
     def generate_annotated_tokens():
         with path.open() as fin:
             for line in fin:
@@ -161,7 +176,6 @@ def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
     return get_token_types(generate_annotated_tokens(), unk_string)
 
 def prepare_annotated_file(vocab, annotator_fst, pair, text_output_file=None):
-    """Annotates strings in a file and saves them as integerized tensors."""
     input_path, output_path = pair
     print(f'preparing annotated tokens in {input_path} => {output_path}', file=sys.stderr)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +195,6 @@ def prepare_annotated_file(vocab, annotator_fst, pair, text_output_file=None):
 # --- Original Functions (from project) ---
 
 def get_token_types_in_next_symbols_file(path, unk_string):
-    """Get token types from the file containing all valid symbols."""
     with path.open() as fin:
         return get_token_types(
             (
@@ -252,7 +265,6 @@ def main():
     parser.add_argument('--use-next-symbols', action='store_true', default=False)
     parser.add_argument('--only-more-data', action='store_true', default=False)
     
-    # Add arguments for FST annotation
     parser.add_argument('--use-state-annotations', action='store_true', help='Enable FST-based state annotations.')
     parser.add_argument('--fst-annotator-path', type=pathlib.Path, help='Path to the FST data file for annotation.')
     parser.add_argument('--annotated-text-output-path', type=pathlib.Path, help='Path to save the annotated tokens in text format for inspection.')
@@ -266,7 +278,6 @@ def main():
     if args.use_state_annotations and not args.fst_annotator_path:
         parser.error('--fst-annotator-path is required for --use-state-annotations')
 
-    # Load and reconstruct annotator FST if needed
     annotator = None
     if args.use_state_annotations:
         print("Loading and reconstructing FST annotator...", file=sys.stderr)
@@ -283,10 +294,7 @@ def main():
 
     unk_string = None if args.never_allow_unk else args.unk_string
 
-    # Build vocabulary
-    if args.use_next_symbols:
-        token_types, has_unk = get_token_types_in_next_symbols_file(training_files[2][0], unk_string)
-    elif annotator:
+    if annotator:
         print("Building vocabulary from annotated tokens...", file=sys.stderr)
         token_types, has_unk = get_annotated_token_types_in_file(training_files[0][0], unk_string, annotator)
     else:
@@ -297,7 +305,6 @@ def main():
     vocab = build_softmax_vocab(tokens, allow_unk, ToIntVocabularyBuilder())
     eos_index = build_softmax_vocab(tokens, allow_unk, ToStringVocabularyBuilder()).eos_index
 
-    # Save vocabulary
     vocab_output_file = args.training_data / 'main.vocab'
     print(f'vocabulary size: {len(vocab)}', file=sys.stderr)
     if not args.only_more_data:
@@ -305,7 +312,6 @@ def main():
         vocab_output_file.parent.mkdir(parents=True, exist_ok=True)
         torch.save({'tokens': tokens, 'allow_unk': allow_unk}, vocab_output_file)
 
-    # Prepare all specified datasets
     annotated_text_output_file = None
     if args.annotated_text_output_path:
         args.annotated_text_output_path.parent.mkdir(parents=True, exist_ok=True)
