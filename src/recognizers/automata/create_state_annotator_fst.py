@@ -3,6 +3,7 @@ import argparse
 import sys
 import torch
 from pathlib import Path
+from rayuela.fsa.state import State
 
 # Add src directory to Python path to allow importing recognizers module
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -44,23 +45,66 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alp
 
     # Build the serializable data dictionary for the annotator FST
     print("Extracting data to build FST...")
-    states = list(fsa.Q)
-    initial_state = next(fsa.I, None)
-    final_states = list(fsa.F)
-    arcs = []
-    for p in states:
-        for i, q, w in fsa.arcs(p):
-            output_label = f"{i}_{p}"
-            # Check if the next state (q) is a final state
-            if q in final_states:
+    
+    # Ensure all states are properly represented as State(int) and extract their int indices
+    # This loop will filter out raw ints and fix recursive State objects if any
+    cleaned_states_set = set()
+    for s in fsa.Q:
+        if isinstance(s, State):
+            cleaned_states_set.add(int(s.idx))
+        elif isinstance(s, int):
+            cleaned_states_set.add(s)
+        else:
+            # Handle other unexpected types if necessary, or raise an error
+            raise TypeError(f"Unexpected state type in fsa.Q: {type(s)}")
+    states_int_idx = sorted(list(cleaned_states_set))
+
+    initial_state_int_idx = None
+    initial_state_tuple = next(fsa.I, None)
+    if initial_state_tuple:
+        q, w = initial_state_tuple
+        if isinstance(q, State):
+            initial_state_int_idx = int(q.idx)
+        elif isinstance(q, int):
+            initial_state_int_idx = q
+
+    final_states_int_idx = []
+    for q, w in fsa.F:
+        if isinstance(q, State):
+            final_states_int_idx.append(int(q.idx))
+        elif isinstance(q, int):
+            final_states_int_idx.append(q)
+
+    arcs_data = []
+    for p_obj in fsa.Q:
+        p_idx = None
+        if isinstance(p_obj, State):
+            p_idx = int(p_obj.idx)
+        elif isinstance(p_obj, int):
+            p_idx = p_obj
+        else:
+            continue # Skip unexpected types
+
+        for i_sym, q_obj, w_semiring in fsa.arcs(p_obj):
+            q_idx = None
+            if isinstance(q_obj, State):
+                q_idx = int(q_obj.idx)
+            elif isinstance(q_obj, int):
+                q_idx = q_obj
+            else:
+                continue # Skip unexpected types
+
+            output_label = f"{i_sym}_{p_idx}"
+            # Check if the next state (q_idx) is a final state
+            if q_idx in final_states_int_idx:
                 output_label = f"{output_label}_F"
-            arcs.append((p, i, output_label, q, w.value))
+            arcs_data.append((p_idx, str(i_sym), output_label, q_idx, w_semiring.value))
 
     fst_data = {
-        'states': states,
-        'initial_state': initial_state,
-        'final_states': final_states,
-        'arcs': arcs,
+        'states': states_int_idx,
+        'initial_state': initial_state_int_idx,
+        'final_states': final_states_int_idx,
+        'arcs': arcs_data,
         'semiring_type': 'tropical'
     }
 

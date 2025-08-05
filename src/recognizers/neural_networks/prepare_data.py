@@ -54,22 +54,27 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     if not tokens:
         return []
     
-    # Manually construct a linear FSA from the input tokens
-    input_fsa = FSA(R=annotator_fst.R)
+    # Manually construct a linear FST from the input tokens
+    input_fst = FST(R=annotator_fst.R) # Changed from FSA to FST
     num_states = len(tokens) + 1
     for i in range(num_states):
-        input_fsa.add_state(i)
-    input_fsa.set_I(0)
-    input_fsa.add_F(num_states - 1, annotator_fst.R(0.0)) # Add final state with appropriate weight
+        input_fst.add_state(i)
+    input_fst.set_I(0)
+    input_fst.add_F(num_states - 1, annotator_fst.R(0.0)) # Add final state with appropriate weight
 
     for i, token in enumerate(tokens):
-        input_fsa.add_arc(i, token, i + 1, annotator_fst.R(0.0))
+        # FST requires both input and output symbols. Using token for both for identity.
+        input_fst.add_arc(i, token, token, i + 1, annotator_fst.R(0.0)) # Changed to add_arc with 4 args
     
     try:
-        composed_fst = annotator_fst.compose(input_fsa)
+        composed_fst = annotator_fst.compose(input_fst) # Changed from input_fsa to input_fst
         best_path = composed_fst.shortest_path()
         return best_path.output_string if best_path else tokens
-    except Exception:
+    except Exception as e:
+        # Added detailed error logging
+        print(f"ERROR in annotate_string: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         return tokens # Fallback to original tokens on error
 
 def get_annotated_token_types_in_file(path, unk_string, annotator_fst):
@@ -94,6 +99,7 @@ def prepare_annotated_file(vocab, annotator_fst, pair):
             tokens = line.strip().split()
             annotated_tokens = annotate_string(tokens, annotator_fst)
             try:
+                print(annotated_tokens)
                 data.append(torch.tensor([vocab.to_int(t) for t in annotated_tokens]))
             except KeyError as e:
                 raise ValueError(f'{input_path}: unknown token: {e}')

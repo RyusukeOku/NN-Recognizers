@@ -1,300 +1,163 @@
-研究に使っているレポジトリです。
+# NN-Recognizers
 
-# experiments
+このリポジトリは、形式言語を認識するニューラルネットワークの訓練と評価を行うためのコードです。実験を再現するために必要なすべてのコードと、開発環境を複製するためのDockerイメージ定義が含まれています。
 
-## *.bash
+## ディレクトリ構成
 
-- submit_job.bash: 計算クラスタに，実験ジョブを投入するためのメインスクリプト
-- job.bash: ここのジョブが実行する処理の本体
-- setup.bash, include.bash: 実験環境の設定や共通の関数を定義するファイル
-- singularity_*.bash: Singularityを操作するスクリプト
+*   `experiments/`: すべての実験と図を再現するための高レベルなスクリプトが含まれています。
+*   `scripts/`: ソフトウェア環境のセットアップ、コンテナイメージのビルド、コンテナの実行、Pythonパッケージのインストールなどのための補助スクリプトが含まれています。
+*   `src/`: ニューラルネットワークの訓練やデータ生成などのためのソースコードが含まれています。
+    *   `recognizers/`: ニューラルネットワークの訓練、データ生成などを行うソースコードです。
+        *   `analysis/`: プロット生成、予測分析などのためのコードです。
+        *   `automata/`: オートマトンのためのデータ構造とアルゴリズムです。
+        *   `hand_picked_languages/`: 各言語の実装です。
+        *   `neural_networks/`: ニューラルネットワークの訓練と評価のためのコードです。
+        *   `string_sampling/`: 正例と負例の文字列をサンプリングするためのコードです。
+    *   `rayuela/`: オートマトンを扱うための補助ライブラリです。
+*   `tests/`: `src/`以下のコードに対するpytestユニットテストが含まれています。
 
-## training/
+## インストールとセットアップ
 
-experiments/training/ ディレクトリには、モデルの訓練と評価に関連するジョブを投入するためのスクリ-プトが格納されています。
+再現性を確保するため、このコードは[`Dockerfile-dev`](Dockerfile-dev)で定義された[Docker](https://www.docker.com/)コンテナ内で開発・実行されました。このコードを実行するには、自分でDockerイメージをビルドして実行するか、`Dockerfile-dev`を参考に自身のシステムにソフトウェア環境をセットアップします。また、同等の[Singularity](https://sylabs.io/docs/#singularity)イメージをビルドして、Dockerが利用できないHPCクラスタなどで使用することも可能です。
 
-- submit_train_and_evaluate_jobs.bash:
-    - モデルの訓練と、その後の評価をまとめて行う一連のジョブを投入します。
-- submit_rerun_evaluate_jobs.bash:
-    - 既に訓練済みのモデルに対して、評価のみを再実行するジョブを投入します。これは、評価データや評価方法を変更して再度テストしたい場合に利用します。
+### Dockerの使用
 
-## dataset_generation/
+Dockerイメージを使用するには、まず[Dockerをインストール](https://www.docker.com/get-started)する必要があります。GPUで実験を実行する場合は、NVIDIAドライバが正しくセットアップされ、[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)がインストールされていることを確認してください。
 
-experiments/dataset_generation/ ディレクトリには、実験に使用する様々なデータセットを生成するためのジョブを投入するスクリプトが格納されています。
+Dockerイメージのビルド、コンテナの起動、そしてコンテナ内でのbashシェルの起動を自動的に行うには、次のコマンドを実行します。
 
-- submit_prepare_automaton_language_jobs.bash:
-    - 形式的なオートマトンから言語データを生成するジョブを投入します。
-- submit_prepare_hand_coded_language_jobs.bash:
-    - src/recognizers/hand_picked_languages/にあるような、手動でコーディングされた特定の規則を持つ言語データを生成するジョブを投入します。
-- submit_prepare_test_edit_distance_jobs.bash:
-    - 文字列間の編集距離を計算するテスト用のデータを生成するジョブを投入します。これは、モデルがどの程度ノイズに強いかを評価するために使われる可能性があります。
+    $ bash scripts/docker_shell.bash --build
 
-## analysis/
+一度イメージをビルドすれば、再度ビルドする必要はありません。その後は、単に次のコマンドを実行します。
 
-experiments/analysis/ ディレクトリには、訓練済みモデルの性能を分析し、結果をまとめるためのスクリプトが格納されています。
+    $ bash scripts/docker_shell.bash
 
-- plot_*.bash:
-    - plot_cross_entropy_vs_edit_distance.bash: モデルの予測誤差（クロスエントロピー）と文字列の編集距離の関係をプロットします。
-    - plot_cross_entropy_vs_length.bash: 予測誤差と入力文字列の長さの関係をプロットします。
-- print_*.bash:
-    - print_main_tables.bash: 実験結果の主要な部分をまとめた表を出力します（論文のメインテーブルなど）。
-    - print_full_tables.bash: より詳細な結果を含む完全な表を出力します。
-    - print_hardest_examples.bash: モデルが最も苦手とした（＝予測が困難だった）サンプルを出力します。
+デフォルトでは、このスクリプトはGPUモードでコンテナを起動します。これはGPUがないマシンでは失敗します。CPUモードでのみ実行したい場合は、次のコマンドを使用します。
 
-# results
+    $ bash scripts/docker_shell.bash --cpu
 
-results/ ディレクトリには、モデルの評価実験から得られた結果をまとめたCSVファイルが格納されています。
+### Singularityの使用
 
-ファイル名から、それぞれのファイルが特定の実験条件やモデル構成に対応した評価結果の要約（特に平均値などの統計量）であることがわかります。
+Singularityは、共有計算環境により適した代替コンテナランタイムです（Apptainerとも呼ばれます）。
 
-例えば、以下のような異なる実験の結果が保存されているようです。
+Singularityコンテナでコードを実行するには、まずDockerイメージを取得し、それをルートアクセス権のあるマシン（個人のPCやワークステーションなど）で`.sif`（Singularityイメージ）ファイルに変換する必要があります。これには、そのマシンにDockerと[Singularity](https://docs.sylabs.io/guides/latest/user-guide/quick_start.html)の両方をインストールする必要があります。上記の指示に従ってDockerイメージをビルド済みであれば、次のコマンドで`.sif`ファイルを作成できます。
 
-- eval_results_mean_summary_lba_*.csv: LBA (Linear Bounded Automaton) に関連するモデルの評価結果。
-- eval_results_mean_summary_ngram_*.csv: N-gramモデルの評価結果。
-- eval_results_mean_summary_with_syntax.csv: 構文情報を利用したモデルの評価結果。
-- eval_results_mean_summary_original.csv: ベースラインとなるオリジナルモデルの評価結果。
+    $ bash scripts/build_singularity_image.bash
 
-これらのファイルは、experiments/analysis/ 内のスクリプトによって読み込まれ、論文用の表やグラフを作成するために利用されると考えられます。
+これにより`neural-network-recognizers.sif`というファイルが作成されます。この処理には数分かかるのが正常です。その後、`.sif`ファイルをHPCクラスタにアップロードして使用できます。
 
-# scripts
+Singularityコンテナ内でシェルを開くには、次のコマンドを使用します。
 
-scripts/ ディレクトリには、開発環境のセットアップ、コンテナの管理、依存関係のインストールなど、プロジェクト全体に関わる補助的なシェルスクリプトが格納されています。
+    $ bash scripts/singularity_shell.bash
 
-主な役割は以下の通りです。
+これはNVIDIA GPUの有無にかかわらず動作しますが、GPUがない場合は警告が出力されます。
 
-- コンテナ管理 (Docker & Singularity):
-    - build_docker_dev_image.bash, build_singularity_image.bash: 開発や実験の再現性を保証するためのDockerやSingularityコンテナイメージをビルドします。
-    - docker_shell.bash, singularity_shell.bash: ビルドしたコンテナ内でインタラクティブなシェルを起動します。
-    - docker_exec.bash: コンテナ内で特定のコマンドを実行します。
-    - get_docker_dev_image.bash: 事前にビルドされたDockerイメージを取得します。
-    - dockerdev.bash: Docker開発環境を管理するための便利なラッパースクリプトのようです。
-- 環境構築と依存関係:
-    - install_python_packages.bash: pyproject.tomlなどに基づいて、必要なPythonパッケージをインストールします。
-    - setup.bash: プロジェクト全体の基本的なセットアップを行います。
-    - variables.bash: 他のスクリプトから参照される共通の環境変数（ファイルパス、イメージ名など）を定義しています。
-- その他:
-    - generate_code_submission.bash: 学会投稿などのために、ソースコードをzipファイルなどにまとめるためのスクリプトです。
+### 追加のセットアップ
 
-# src
+どの方法（Docker、Singularity、またはコンテナなし）でコードを実行するかにかかわらず、*コンテナシェル内で*一度だけ次のスクリプトを実行する必要があります。
 
-src/ ディレクトリは、このプロジェクトのすべてのソースコードを格納する中心的な場所です。主に3つのサブディレクトリに分かれています。
+    $ bash scripts/setup.bash
 
-- `recognizers/`:
-    - このプロジェクトの中核となるアプリケーションコードです。
-    - neural_networks/: ニューラルネットワークモデルの定義、訓練、評価を行うコードが含まれています。
-        1. データ準備と管理
-            - prepare_data.py, prepare_data_original.py:
-                - automataやhand_picked_languagesで生成された言語データを、ニューラルネットワークが読み込める形式（数値テンソルなど）に前処理・変換するスクリプトです。
-                - prepare_language.bash:
-                    - prepare_data.pyの実行を補助するシェルスクリプトです。
-                - [data.py](http://data.py/):
-                    - PyTorchのDatasetやDataLoaderのように、モデルにデータを供給するためのクラスが定義されています。
-                - [vocabulary.py](http://vocabulary.py/):
-                    - 文字や記号（トークン）と、それに対応する数値IDの辞書（Vocabulary）を管理します。
-                - [batching.py](http://batching.py/):
-                    - 長さが異なる複数の文（シーケンス）をまとめて一つのバッチにするための処理（パディングなど）を実装しています。
-            1. モデルのアーキテクチャ定義
-            - model_interface.py:
-                - すべてのモデルが従うべき共通のインターフェース（抽象基底クラス）を定義しています。これにより、異なるモデルでも同じ訓練・評価コードを再利用できます。
-            - model_interface_original.py, model_interface_ngram.py:
-                - model_interfaceを継承した、具体的なモデルアーキテクチャの実装です。「オリジナルモデル」や「N-gramモデル」など、複数のモデルが試されていることがわかります。
-            - [lba.py](http://lba.py/):
-                - LBA (Linear Bounded Automaton) を模倣したニューラルネットワークモデルの実装の可能性があります。
-            - ngram_head.py:
-                - N-gramモデルの出力層（ヘッド）部分の実装です。
-            - resettable_positional_encoding.py:
-                - Transformerなどで使われる位置エンコーディングのカスタム実装です。「リセット可能」という名前から、特殊な処理が加えられていることが推測されます。
-            1. 訓練と評価の実行
-            - [train.py](http://train.py/):
-                - モデルの訓練を実行するメインスクリプトです。
-            - [evaluate.py](http://evaluate.py/):
-                - 訓練済みモデルの性能評価を実行するメインスクリプトです。
-            - training_loop.py:
-                - エポックやバッチを回す訓練ループの本体ロジックが実装されています。train.pyから呼び出される形です。
-            - train_and_evaluate.bash, evaluate.bash:
-                - experiments/以下のジョブスクリプトから呼び出され、train.pyやevaluate.pyに適切な引数を渡して実行するためのシェルスクリプトです。
-            - get_architecture_args.py:
-                - コマンドライン引数を解釈し、使用するモデルアーキテクチャのパラメータを取得するヘルパースクリプトです。
-    - automata/: オートマトン（言語を認識するための抽象的な計算モデル）に関連する実装が含まれています。
-        1. 計算の核：「 (Semiring)」による抽象化
-        
-        このディレクトリの最も重要な設計思想はSemiring（半環）による計算の汎用化です。オートマトン内の経路計算を、目的（最短経路、経路数、受理可能性など）に応じて差し替え可能にするための
-        仕組みです。
-        
-        - [semiring.py](http://semiring.py/):
-            - Semiringの抽象基底クラス（インターフェース）を定義します。すべてのセiringはこのクラスを継承します。
-        - boolean_semiring.py:
-            - ある文字列が言語に受理されるか否か（True/False）を計算するためのセiringです。
-        - tropical_semiring.py:
-            - 経路の重み（コスト）の最小値を計算するためのセiringです（最短経路問題）。
-        - counting_semiring.py:
-            - ある文字列を受理する経路の総数を数え上げるためのセiringです。
-        - log_counting_semiring.py:
-            - counting_semiringと同様に経路数を数えますが、巨大な数になってもオーバーフローしないよう、対数領域で計算を行います。数値的な安定性のために重要です。
-        1. オートマトン本体とアルゴリズム
-        
-        上記セiringを実際に利用して計算を行う、オートマトン本体と関連アルゴリズムです。
-        
-        - [automaton.py](http://automaton.py/):
-            - オートマトン（状態、遷移、アルファベットなど）の基本的なデータ構造を定義する、中心的なクラスです。
-        - finite_automaton.py:
-            - automaton.pyを継承した、具体的な有限オートマトン（FA）の実装です。
-        - finite_automaton_allsum.py:
-            - 入力文字列に対して、指定されたSemiringを用いてすべての可能な経路にわたる計算（all-path-sum）を実行するアルゴリズムです。このファイルが、オートマトンとセiringを結びつける「計算エンジン」の役割を果たします。
-        - fixed_point_iteration.py:
-            - 不動点反復法を実装しています。これは、オートマトンの状態 reachable（到達可能）かどうかを判断するなど、様々な解析アルゴリズムの基礎となります。
-        - create_state_annotator_fst.py:
-            - 非常に興味深いファイルです。これは、文字列を入力として受け取り、その文字列を処理する際にオートマトンが通過する状態の系列を注釈（annotate）として出力する有限状態トランスデュ
-            ーサ（FST）を作成します。これは、ニューラルネットワークに「正解の計算過程」を教えるための教師データを生成するのに使われる可能性があります。
-        - [lehmann.py](http://lehmann.py/):
-            - Lehmannに関連する特定のオートマトンアルゴリズムの実装だと思われます。
-        - [reserved.py](http://reserved.py/):
-            - ε（空文字）や未知の記号など、システム内で特別な意味を持つ予約済み記号を定義しています。
-        
-        まとめ
-        
-        このディレクトリは、単に文字列を受理するだけでなく、「どのように受理するか」を柔軟に計算できる、高度に抽象化されたオートマトンライブラリです。セiringを切り替えるだけで、同じオートマトンを使って最短経路、経路数、受理可能性などを自在に計算できる、非常に強力なツールキットと言えます。
-        
-    - hand_picked_languages/: dyck_k_m（カッコの対応）や
-    binary_addition（2進数の足し算）など、特定の規則を持つ言語を手動で定義したコードが含まれています。これらがモデルの訓練・評価データになります。
-        1. 算術・計数能力をテストする言語
-        - binary_addition.py: 2進数の足し算 (例: "101+11=1000")。モデルが算術規則を学習できるかをテストします。
-        - binary_multiplication.py: 2進数の掛け算。足し算より複雑な算術能力を要求します。
-        - [parity.py](http://parity.py/): 偶奇性 (例: "1101" → 1が奇数個)。基本的な計数能力をテストします。
-        - [majority.py](http://majority.py/): 過半数 (例: "aab" → aが過半数)。シンボルの出現頻度を比較する能力をテストします。
-        - modular_arithmetic_simple.py: 単純な剰余演算。
-        1. 記憶・構造認識能力をテストする言語
-        - dyck_k_m.py: ダイク言語 (例:
-        "([{}])")。入れ子構造を持つカッコの対応関係を認識する能力をテストします。これは文脈自由文法の典型例であり、単純な記憶以上の能力（スタックのような機能）が要求されます。
-        - unmarked_reversal.py: 文字列の反転 (例: "abc" → "abccba")。入力シーケンスを記憶し、逆順に出力する能力をテストします。
-        - marked_reversal.py: 例: "abc#cba" のように、中央に区切り文字がある反転。unmarkedよりも簡単な記憶タスクです。
-        - cycle_navigation.py: サイクルの巡回。状態を記憶し、特定の順序で遷移する能力をテストします。
-        - stack_manipulation.py: より直接的にスタック操作（PUSH, POP）を模倣した言語です。
-        1. 並べ替え・ソート能力をテストする言語
-        - odds_first.py: 奇数を先に (例: "1234" → "1324")。入力シーケンスをルールに基づいて並べ替える能力をテストします。
-        - bucket_sort.py: バケットソート。より複雑なソートアルゴリズムの学習能力をテストします。
-        
-        補助的なファイルの役割
-        
-        - rayuela_util.py: このディレクトリでPythonコードとして定義された各言語を、プロジェクトの共通ライブラリである rayuela
-        のオートマトン形式に変換するためのユーティリティ関数です。これが「接着剤」の役割を果たし、手書きのルールを形式的なオブジェクトに変換します。
-        - save_automaton.py: rayuela_util.py
-        を使って生成したオートマトンを、ファイルとして保存するためのスクリプトです。一度保存しておけば、データセット生成の際に毎回言語を定義し直す必要がなくなり、効率的です。
-        - binary_util.py: 2進数関連の言語（加算、乗算）で共通して使われる処理をまとめたユーティリティです。
-    - analysis/: experiments/analysisのスクリプトから呼び出される、実際の分析処理（プロット作成やテーブル生成）を行うPythonスクリプトが含まれています。
-        1. プロット（図）作成
-            - plot_cross_entropy_vs_edit_distance.py:
-                - モデルの予測誤差（クロスエントロピー）と、入力文字列の「編集距離」（ノイズの量）との関係をプロットします。モデルがどの程度ノイズに頑健か（ロバストか）を分析するために使われ
-                ます。
-            - plot_cross_entropy_vs_length.py:
-                - 予測誤差と入力文字列の「長さ」との関係をプロットします。モデルが長いシーケンスを苦手としていないかを分析します。
-            - plot_num_edits_histogram.py:
-                - 評価データセットに含まれる文字列の編集距離の分布をヒストグラムとしてプロットします。
-            - plot_util.py:
-                - 上記のプロット作成スクリプト群で共通して使われる補助関数（グラフのスタイル設定、軸ラベルの定義、ファイルの保存など）をまとめたユーティリティファイルです。
-        2. テーブル（表）作成
-        - print_main_table.py:
-            - 実験結果の最も重要な部分をまとめたメインテーブル（論文の中心となる結果表など）を生成します。
-        - print_table.py:
-            - より汎用的なテーブル生成スクリプトです。
-        - print_table_util.py:
-            - テーブル作成のための補助関数（CSVの読み込み、数値のフォーマット、LaTeX形式への変換など）をまとめたユーティリティファイルです。
-        - print_best_model.py:
-            - 各言語タスクにおいて、最も性能が良かったモデルのパラメータやスコアを特定し、表示します。
-        1. 詳細なエラー分析
-        - sort_examples_by_difficulty.py:
-            - モデルの評価結果に基づき、モデルが最も苦手とした（＝予測誤差が大きかった）サンプルを難しい順に並べ替えて出力します。これは、モデルがどのような種類の入力で間違いやすいのかを
-            詳細に分析する「エラー分析」のために非常に重要です。
-- `rayuela/`:
-    - オートマトンや文法など、形式言語理論に関連する基本的なデータ構造やアルゴリズムを提供するライブラリです。recognizers/ のコードはこのライブラリに依存していると考えられます。
-        
-        主なファイルの役割
-        
-        1. 形式言語の基本要素 (The Core Building Blocks)
-        - [symbol.py](http://symbol.py/):
-            - 言語を構成する最小単位である「シンボル（記号）」を表現します。'a', 'b', '1' など、一つ一つの文字や記号がこれにあたります。
-        - [alphabet.py](http://alphabet.py/):
-            - シンボルの集合である「アルファベット」を定義します。例えば、{'a', 'b', 'c'} のような集合です。
-        - [string.py](http://string.py/):
-            - シンボルの列である「文字列（ストリング）」を表現します。
-        - [state.py](http://state.py/):
-            - オートマトンや文法における「状態（ステート）」を表現します。計算モデルのノードに相当します。
-        1. 計算の抽象化 (The Core Abstraction)
-        - [semiring.py](http://semiring.py/):
-            - このライブラリの設計思想の中核をなす「Semiring（半環）」の抽象基底クラスです。これにより、オートマトンの経路計算を「受理可能か」「最短経路は」「経路数は」といった異なる目的に応じて、アルゴリズム本体を変更することなく差し替え可能にしています。これは recognizers/automata でも利用されている非常に重要な概念です。
-        1. 補助的なデータ構造とアルゴリズム (Supporting Data Structures & Algorithms)
-        - [partitions.py](http://partitions.py/):
-            - 集合の「分割」を扱うためのデータ構造です。オートマトンの状態を等価なグループに分ける（状態最小化アルゴリズムなど）際に不可欠です。
-        - [unionfind.py](http://unionfind.py/):
-            - Union-Find（素集合データ構造）の実装です。要素を互いに素な集合に分類し、管理するために使われます。これも partitions
-            と同様に、等価性の判定やグループ分けに非常に効率的なデータ構造です。
-        - [datastructures.py](http://datastructures.py/):
-            - ライブラリ内で共通して使われる、より一般的なデータ構造（特殊なキューやスタックなど）が定義されている可能性があります。
-        - [misc.py](http://misc.py/), [universal.py](http://universal.py/):
-            - 特定のカテゴリに分類しにくい、様々な補助関数や定数がまとめられています。
-        1. 少し高度な概念
-        - [termdep.py](http://termdep.py/):
-            - "Term Dependency" の略だと思われます。これは、シンボル間の依存関係や、より複雑な項書き換えシステム（Term Rewriting
-            System）に関連する概念を扱うためのコンポーネントである可能性があります。
-    - fsa/: 有限状態オートマトン (Finite State Automaton) の実装。
-        1. 基本的なデータ構造 (Core Data Structures)
-            - [fsa.py](http://fsa.py/): 有限状態オートマトン（FSA）のクラスを定義する、このディレクトリで最も中心的なファイルです。FSAは文字列を「受理」または「拒絶」するモデルです。
-            - [fst.py](http://fst.py/): 有限状態トランスデューサ（FST）のクラスを定義します。FSTは、入力文字列を出力文字列に「変換」するモデルで、翻訳やアノテーションなど、より高度なタスクに使われます。
-            - [arc.py](http://arc.py/): オートマトンの状態と状態を結ぶ「アーク（遷移）」を表現するクラスです。アークは通常、入力シンボル、出力シンボル（FSTの場合）、および重みを持ちます。
-            - fsa_classes.py: FSA/FSTに関連する、その他の補助的なクラスがまとめられている可能性があります。
-        2. 計算エンジンと中核アルゴリズム (Computational Engine & Core Algorithms)
-        - [pathsum.py](http://pathsum.py/): オートマトンの計算エンジンです。与えられた入力文字列に対して、base/semiring.pyで定義されたセiring（半環）を用いて、すべての可能な経路の「合計（sum）」を計算します。
-        セiringを切り替えることで、この「合計」が「最短経路のコスト」になったり、「経路の総数」になったりします。
-        - [transformer.py](http://transformer.py/): FSA/FSTを変換（transform）するためのアルゴリズム集です。以下のような、形式言語理論における標準的な操作が含まれていると推測されます。
-            - 決定化（Determinization）: 非決定性オートマトンを等価な決定性オートマトンに変換します。
-            - 最小化（Minimization）: 状態数が最小の等価なオートマトンに変換します。
-            - 和（Union）、積（Intersection）、連結（Concatenation）: 複数のオートマトンを組み合わせて新しいオートマトンを作ります。
-        - [scc.py](http://scc.py/): 強連結成分（Strongly Connected Components）を求めるアルゴリズムです。オートマトン内のサイクル構造を解析するために使われます。
-        1. オートマトンの学習 (Automata Learning)
-        このライブラリの非常に高度な機能です。与えられたサンプル（文字列の集合）から、その言語を生成するオートマトンを自動的に推論（学習）するアルゴリズムが含まれています。
-        - [learning.py](http://learning.py/): 学習アルゴリズムの汎用的なインターフェースや基盤を提供します。
-        - [angluin.py](http://angluin.py/): 正則言語（FSAが認識する言語）の学習アルゴリズムとして非常に有名な「L\*（エルスター）アルゴリズム」の実装です。
-        - [beimel.py](http://beimel.py/), [hankel.py](http://hankel.py/): L\*アルゴリズム以外にも、オートマトンの学習や性質の検証に関連する、より専門的なアルゴリズムや数学的な道具（ハンケル行列など）が実装されています。
-        1. 生成とサンプリング (Generation and Sampling)
-        - [generator.py](http://generator.py/): ランダムなFSAを生成します。アルゴリズムのテストなどに使われます。
-        - [random.py](http://random.py/), [sampler.py](http://sampler.py/): 与えられたFSAが受理する言語から、ランダムに文字列をサンプリング（生成）します。これは、ニューラルネットワークの訓練データを生成する際に不可欠です。
-        1. その他
-        - [examples.py](http://examples.py/): テストやデモ用の、具体的なFSAのサンプルが定義されています。
-        - [utils.py](http://utils.py/): 上記のいずれにも分類されない、FSA関連の補助的な関数がまとめられています。
-    - cfg/: 文脈自由文法 (Context-Free Grammar) の実装。
-        
-        主な役割とファイル分類
-        
-        1. 基本的なデータ構造 (Core Data Structures)
-        - [cfg.py](http://cfg.py/): 文脈自由文法（CFG）のクラスを定義する、このディレクトリで最も中心的なファイルです。CFGは、非終端記号、終端記号、開始記号、生成規則の集合から構成されます。
-        - [production.py](http://production.py/): CFGの「生成規則（プロダクション）」を表現するクラスです。例えば、S -> NP VP のような規則を定義します。
-        - [nonterminal.py](http://nonterminal.py/): CFGの「非終端記号」を表現するクラスです。S (文), NP (名詞句), VP (動詞句) などがこれにあたります。
-        - labeled_cfg.py: 通常のCFGに加えて、規則や非終端記号にラベル（追加情報）を付与できるCFGの実装です。構文解析結果に意味的な情報を付加する際に有用です。
-        1. 構文解析と関連アルゴリズム (Parsing and Related Algorithms)
-        - [parser.py](http://parser.py/): 入力文字列が与えられたCFGによって生成可能かどうかを判断し、その構文構造（パースツリー）を構築する「構文解析器（パーサー）」の実装です。
-        - [pda.py](http://pda.py/): プッシュダウンオートマトン（Pushdown Automaton, PDA）の実装です。CFGと等価な計算能力を持つ抽象機械であり、CFGの構文解析の理論的基盤となります。
-        - [transformer.py](http://transformer.py/): CFGを変換（transform）するためのアルゴリズム集です。以下のような操作が含まれると推測されます。
-            - チョムスキー標準形（Chomsky Normal Form, CNF）への変換: 構文解析アルゴリズム（CYK法など）で扱いやすい形に変換します。
-            - 左再帰の除去: 再帰的な規則を変換し、特定のパーサーが無限ループに陥るのを防ぎます。
-        - [prefix.py](http://prefix.py/): 構文解析における接頭辞（prefix）に関連する概念やアルゴリズムを扱うファイルです。
-        1. 特殊な文法と概念 (Specialized Grammars and Concepts)
-        - bilexical_grammar.py: バイレキシカル文法の実装です。単語ペア間の依存関係を直接モデル化する文法で、依存構造解析（Dependency Parsing）に関連します。
-        - [dependency.py](http://dependency.py/): 依存構造に関連する概念やアルゴリズムを扱うファイルです。
-        - [brzozowski.py](http://brzozowski.py/): Brzozowskiのアルゴリズムに関連する実装です。これは、正規表現の導関数（derivative）を用いた正規表現マッチングや、オートマトンの最小化などに使われることがあります
-        。CFGの文脈で使われる場合は、文法変換や解析の効率化に関連する可能性があります。
-        - [treesum.py](http://treesum.py/): パースツリーの「合計（sum）」を計算するアルゴリズムです。fsa/pathsum.pyと同様に、セiringを用いて、異なる目的（最も確率の高いツリー、ツリーの総数など）でツリーを評価
-        するために使われる可能性があります。
-        1. 生成とサンプリング (Generation and Sampling)
-        - [random.py](http://random.py/), [sampler.py](http://sampler.py/):
-        与えられたCFGが生成する言語から、ランダムに文字列やパースツリーをサンプリング（生成）します。これは、ニューラルネットワークの訓練データを生成する際に利用されます。
-        1. ユーティリティと補助 (Utility and Support)
-        - [examples.py](http://examples.py/): テストやデモ用の、具体的なCFGのサンプルが定義されています。
-        - [exceptions.py](http://exceptions.py/): CFGの操作中に発生する可能性のある例外を定義しています。
-        - [misc.py](http://misc.py/): 上記のいずれにも分類されない、CFG関連の補助的な関数がまとめられています。
-- `data/`:
-    - ソースコード以外のデータを格納します。
-    - figures/: 論文やレポートに掲載するための図や表を生成するためのLaTeXファイル (.tex) が含まれています。実験結果を整形して出力するために使われます。
+このスクリプトは、コードが必要とするPythonパッケージをインストールします。パッケージはシステムワイドではなく、ローカルディレクトリに保存されます。
 
-# tests
+## コードの実行
 
-# root
+`src/`以下のすべてのファイルは、Poetryが提供するPythonパッケージにアクセスできるよう、`poetry`を使用して実行する必要があります。つまり、すべてのコマンドの前に`poetry run`を付けるか、事前に`poetry shell`を実行してPoetryの仮想環境が有効なシェルに入ります。BashスクリプトがPythonスクリプトを呼び出す可能性があるため、PythonスクリプトとBashスクリプトの両方をPoetryで実行する必要があります。`src/`以下のすべてのBashスクリプトは、`src/`をカレントワーキングディレクトリとして実行してください。
+
+`scripts/`と`experiments/`以下のすべてのスクリプトは、トップレベルディレクトリをカレントワーキングディレクトリとして実行してください。
+
+## 実験の実行
+
+[`experiments/`](experiments)ディレクトリには、すべての実験とプロットを再現するためのスクリプトが含まれています。一部のスクリプトは、計算クラスタにジョブを投入することを目的としています。これらはコンテナの外で実行する必要があります。ご自身の計算クラスタに合わせて[`experiments/submit_job.bash`](experiments/submit_job.bash)ファイルを編集する必要があります。他のスクリプトはプロットやテーブルの出力用であり、コンテナ内で実行する必要があります。
+
+### データセット生成
+
+データセットをゼロから生成するためのスクリプトは`experiments/dataset_generation/`にあります。すべてのデータセットは固定のランダムシードでサンプリングされるため、結果は決定論的です。
+
+データセット生成は以下のステップで構成されます：
+
+1.  (正則言語のみ) 言語のDFAを.ptファイルに書き出す。
+2.  (正則言語のみ) サンプリングに使用できるよう、DFAに重みプッシュを実行する。
+3.  各分割（訓練/検証/テスト）に対して正例と負例をランダムにサンプリングし、結果を平文ファイルとして保存する。
+4.  平文ファイルを準備する。具体的には、すべての記号を整数に変換し、.ptファイルに保存する。
+
+関連スクリプト：
+*   `submit_prepare_automaton_language_jobs.bash`: すべての正則言語のデータセットを生成・準備します。
+*   `submit_prepare_hand_coded_language_jobs.bash`: すべての非正則言語のデータセットを生成・準備します。
+*   `submit_prepare_test_edit_distance_jobs.bash`: 編集距離のプロットに使用するデータセットを生成・準備します。`submit_prepare_automaton_language_jobs.bash`の後に実行する必要があります。
+
+### ニューラルネットワークの訓練
+
+関連スクリプトは`experiments/training/`にあります。データセットが生成・準備された後に実行してください。
+
+*   `submit_train_and_evaluate_jobs.bash`: すべての言語で、すべてのモデルの訓練と評価を行います。
+*   `submit_rerun_evaluate_jobs.bash`: モデルの再訓練なしに、評価のみを再実行します。モデルの再訓練を必要としない評価エラーが発生した場合に便利です。
+
+### 分析
+
+関連スクリプトは`experiments/analysis/`にあります。モデルが訓練・評価された後に実行してください。
+
+*   `print_full_tables.bash`: すべての言語に対する省略なしの結果テーブルを生成します。
+*   `print_main_tables.bash`: すべての帰納バイアスと表現力の実験をまとめたテーブル、および最良の損失関数を示すテーブルを生成します。
+*   `plot_cross_entropy_vs_edit_distance.bash`: クロスエントロピー対編集距離のプロットを生成します。
+*   `print_hardest_examples.bash`: 特定の言語とアーキテクチャについて、テストセットの例をクロスエントロピーが高い順（難しい順）にソートします。
+
+## 実験のカスタマイズ
+
+このフレームワークの実験は、`src/recognizers/neural_networks/train.py` スクリプトに渡すコマンドライン引数を変更することで、柔軟にカスタマイズできます。`experiments/training/submit_train_and_evaluate_jobs.bash` のようなジョブ提出スクリプト内でこれらの引数を設定することで、独自の実験を実行できます。
+
+### データセットのカスタマイズ
+
+データセットは `src/recognizers/neural_networks/prepare_data.py` を用いて生成されます。主要な引数は以下の通りです。
+
+*   `--language`: `src/recognizers/hand_picked_languages` で定義されている言語の名前（例: `parity`, `binary_addition`）。
+*   `--num-train-examples`, `--num-dev-examples`, `--num-test-examples`: 各データ分割のサンプル数を指定します。
+*   `--max-length`: 生成される文字列の最大長を指定します。
+
+### モデルアーキテクチャとハイパーパラメータの選択
+
+`train.py` は、モデルのアーキテクチャとハイパーパラメータを制御するための多くの引数を受け取ります。
+
+**1. アーキテクチャの選択:**
+
+`--architecture` 引数で使用するモデルのクラス名を指定します。利用可能なアーキテクチャは `src/recognizers/neural_networks/model_interface.py` で定義されている `get_architectures()` 関数で確認できます。一般的な選択肢は以下の通りです。
+
+*   `Transformer`
+*   `LSTM`
+*   `Ngram`
+
+**2. 共通のハイパーパラメータ:**
+
+*   `--language`: 訓練に使用する言語。
+*   `--epochs`: 訓練エポック数。
+*   `--learning-rate`: 学習率。
+*   `--batch-size`: バッチサイズ。
+*   `--loss-function`: 損失関数（例: `cross_entropy`, `length_normalized_cross_entropy`）。
+
+**3. アーキテクチャ固有のハイパーパラメータ:**
+
+選択したアーキテクチャに応じて、追加の引数を指定できます。例えば、`--architecture Transformer` を選択した場合、以下のような引数が利用可能です。
+
+*   `--num-layers`: Transformerのエンコーダ層の数。
+*   `--num-heads`: Multi-head attentionのヘッド数。
+*   `--embedding-dim`: 埋め込みベクトルの次元数。
+*   `--hidden-dim`: Feed-forwardネットワークの隠れ層の次元数。
+
+これらの引数は、`ModelInterface` を継承した各モデルクラスの `add_architecture_args` 静的メソッドで定義されています。
+
+### カスタム実験の実行例
+
+例えば、Dyck-2言語 (`dyck_2_10`) に対して、4層で8ヘッドのTransformerモデルを、学習率0.0001、バッチサイズ64で50エポック訓練する場合、`submit_train_and_evaluate_jobs.bash` のようなスクリプト内で、`train.py` を以下のような引数で呼び出すことになります。
+
+```bash
+poetry run python src/recognizers/neural_networks/train.py \
+    --language dyck_2_10 \
+    --architecture Transformer \
+    --epochs 50 \
+    --learning-rate 0.0001 \
+    --batch-size 64 \
+    --num-layers 4 \
+    --num-heads 8 \
+    --embedding-dim 256 \
+    --hidden-dim 1024
+```
