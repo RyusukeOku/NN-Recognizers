@@ -81,7 +81,7 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     print(f"DEBUG: Type of input_fst: {type(input_fst)}")
 
     try:
-        composed_fst = annotator_fst.compose(input_fst)
+        composed_fst = input_fst.compose(annotator_fst, augment=False)
         # Use Pathsum to find the shortest path
         pathsum_obj = Pathsum(composed_fst)
         best_path_semiring = pathsum_obj.pathsum(Strategy.VITERBI) # Viterbi for shortest path in Tropical semiring
