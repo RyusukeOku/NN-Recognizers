@@ -24,6 +24,11 @@ from rau.vocab import ToIntVocabularyBuilder, ToStringVocabularyBuilder
 
 # --- Functions for FST State Annotation ---
 
+from rayuela.base.state import State # Added import
+from rayuela.base.symbol import Sym # Added import
+
+# --- Functions for FST State Annotation ---
+
 def reconstruct_fst_from_data(fst_data: dict) -> FST:
     """Reconstructs a Rayuela FST object from a saved data dictionary."""
     semiring_map = {
@@ -35,17 +40,17 @@ def reconstruct_fst_from_data(fst_data: dict) -> FST:
         raise ValueError(f"Unsupported semiring type: {fst_data['semiring_type']}")
 
     fst = FST(R=semiring)
-    for state in fst_data['states']:
-        fst.add_state(state)
+    for state_idx in fst_data['states']:
+        fst.add_state(State(state_idx))
     
     if fst_data['initial_state'] is not None:
-        fst.set_I(fst_data['initial_state'])
+        fst.set_I(State(fst_data['initial_state']))
     
-    for final_state in fst_data['final_states']:
-        fst.add_F(final_state, semiring(0.0))
+    for final_state_idx in fst_data['final_states']:
+        fst.add_F(State(final_state_idx), semiring(0.0))
     
-    for p, i, o, q, w_val in fst_data['arcs']:
-        fst.add_arc(p, i, o, q, semiring(w_val))
+    for p_idx, i_sym, o_sym, q_idx, w_val in fst_data['arcs']:
+        fst.add_arc(State(p_idx), Sym(i_sym), Sym(o_sym), State(q_idx), semiring(w_val))
         
     return fst
 
@@ -55,19 +60,22 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
         return []
     
     # Manually construct a linear FST from the input tokens
-    input_fst = FST(R=annotator_fst.R) # Changed from FSA to FST
+    input_fst = FST(R=annotator_fst.R)
     num_states = len(tokens) + 1
     for i in range(num_states):
-        input_fst.add_state(i)
-    input_fst.set_I(0)
-    input_fst.add_F(num_states - 1, annotator_fst.R(0.0)) # Add final state with appropriate weight
+        input_fst.add_state(State(i))
+    input_fst.set_I(State(0))
+    input_fst.add_F(State(num_states - 1), annotator_fst.R(0.0)) # Add final state with appropriate weight
 
     for i, token in enumerate(tokens):
         # FST requires both input and output symbols. Using token for both for identity.
-        input_fst.add_arc(i, token, token, i + 1, annotator_fst.R(0.0)) # Changed to add_arc with 4 args
+        input_fst.add_arc(State(i), Sym(token), Sym(token), State(i + 1), annotator_fst.R(0.0))
     
+    print(f"DEBUG: Type of annotator_fst: {type(annotator_fst)}")
+    print(f"DEBUG: Type of input_fst: {type(input_fst)}")
+
     try:
-        composed_fst = annotator_fst.compose(input_fst) # Changed from input_fsa to input_fst
+        composed_fst = annotator_fst.compose(input_fst)
         best_path = composed_fst.shortest_path()
         return best_path.output_string if best_path else tokens
     except Exception as e:
