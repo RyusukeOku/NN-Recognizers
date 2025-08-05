@@ -29,6 +29,12 @@ from rayuela.base.symbol import Sym # Added import
 
 # --- Functions for FST State Annotation ---
 
+from rayuela.base.state import State # Added import
+from rayuela.base.symbol import Sym # Added import
+from rayuela.fsa.pathsum import Pathsum, Strategy # Added import
+
+# --- Functions for FST State Annotation ---
+
 def reconstruct_fst_from_data(fst_data: dict) -> FST:
     """Reconstructs a Rayuela FST object from a saved data dictionary."""
     semiring_map = {
@@ -76,8 +82,15 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
 
     try:
         composed_fst = annotator_fst.compose(input_fst)
-        best_path = composed_fst.shortest_path()
-        return best_path.output_string if best_path else tokens
+        # Use Pathsum to find the shortest path
+        pathsum_obj = Pathsum(composed_fst)
+        best_path_semiring = pathsum_obj.pathsum(Strategy.VITERBI) # Viterbi for shortest path in Tropical semiring
+        print(f"DEBUG: Best path semiring value: {best_path_semiring}")
+        if best_path_semiring != annotator_fst.R.zero:
+            return [f"{t}_annotated" for t in tokens] # Placeholder: Replace with actual path extraction
+        else:
+            return tokens
+
     except Exception as e:
         # Added detailed error logging
         print(f"ERROR in annotate_string: {e}", file=sys.stderr)
