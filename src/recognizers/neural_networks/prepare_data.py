@@ -81,7 +81,18 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
     print(f"DEBUG: Type of input_fst: {type(input_fst)}")
 
     try:
-        composed_fst = input_fst.compose(annotator_fst, augment=False)
+        composed_fst = input_fst._compose(annotator_fst)
+
+        print(f"DEBUG: Composed FST after _compose:")
+        print(f"  Num states: {composed_fst.num_states}")
+        print(f"  Initial states: {list(composed_fst.I)}")
+        print(f"  Final states: {list(composed_fst.F)}")
+        print(f"  Arcs:")
+        for q in composed_fst.Q:
+            for arc_info in composed_fst.arcs(q):
+                print(f"    {q} --{arc_info[0]}--> {arc_info[1]} (weight: {arc_info[2]})", file=sys.stderr)
+        print("--------------------------------------------------", file=sys.stderr)
+
         # Use Pathsum to find the shortest path
         pathsum_obj = Pathsum(composed_fst)
         best_path_semiring = pathsum_obj.pathsum(Strategy.VITERBI) # Viterbi for shortest path in Tropical semiring
