@@ -97,103 +97,38 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
         pathsum_obj = Pathsum(composed_fst)
         best_path_semiring = pathsum_obj.pathsum(Strategy.VITERBI) # Viterbi for shortest path in Tropical semiring
         print(f"DEBUG: Best path semiring value: {best_path_semiring}")
-        if best_path_semiring != annotator_fst.R.zero:
-            # Path exists, so we reconstruct it.
-            # 1. Compute backward Viterbi scores (beta values).
-            beta = pathsum_obj.backward(Strategy.VITERBI)
-
-            # 2. Find the best initial state to start the path from.
-            start_state = None
-            # In a Tropical semiring with all 0-cost paths, any initial state that can
-            # reach a final state is a valid start. We can just pick the first one.
-            for q, w in composed_fst.I:
-                if beta[q] != annotator_fst.R.one: # Check if the state can reach a final state
-                    start_state = q
-                    break # Found a valid start state, no need to check others
+        # Always use a greedy forward pass to annotate the longest possible prefix.
+        # This simplifies the logic and provides consistent annotation behavior
+        # for both accepted and rejected strings.
+        annotated_tokens = []
+        try:
+            # Assume a single initial state for simplicity
+            curr_state = next(composed_fst.I)[0]
             
-            if start_state is None:
-                return tokens # Should not happen if a path was found
-
-            # 3. Walk forward from the best start state, guided by beta scores.
-            annotated_tokens = []
-            curr_state = start_state
-            final_states = {q for q, w in composed_fst.F}
-
-            # Match the path against the original tokens
-            token_idx = 0
-            while token_idx < len(tokens):
-                if curr_state in final_states and not any(composed_fst.arcs(curr_state)):
+            for i, token_str in enumerate(tokens):
+                token_sym = Sym(token_str)
+                
+                found_arc = False
+                # Find the first arc that matches the current token
+                # Note: This is a greedy choice. If multiple arcs match the token,
+                # it takes the first one the FST provides.
+                for (in_sym, out_sym), next_state, arc_weight in composed_fst.arcs(curr_state):
+                    if in_sym == token_sym:
+                        annotated_tokens.append(str(out_sym))
+                        curr_state = next_state
+                        found_arc = True
+                        break
+                
+                if not found_arc:
+                    # We are stuck. Append the rest of the original tokens and stop.
+                    annotated_tokens.extend(tokens[i:])
                     break
-
-                best_arc = None
-                min_arc_weight = annotator_fst.R.one  # Infinity
-                current_token_sym = Sym(tokens[token_idx])
-
-                # Find the best outgoing arc that matches the current token
-                arcs = list(composed_fst.arcs(curr_state))
-                if not arcs:
-                    if curr_state in final_states:
-                        break
-                    else:
-                        print(f"ERROR: Viterbi path tracking stuck at non-final state {curr_state}.", file=sys.stderr)
-                        return tokens # Return original tokens on failure
-
-                found_matching_arc = False
-                for (in_sym, out_sym), next_state, arc_weight in arcs:
-                    # The input symbol in the composed FST must match the original token
-                    if in_sym == current_token_sym:
-                        found_matching_arc = True
-                        path_weight_through_arc = arc_weight * beta[next_state]
-                        if path_weight_through_arc < min_arc_weight:
-                            min_arc_weight = path_weight_through_arc
-                            best_arc = ((in_sym, out_sym), next_state)
-                
-                if not found_matching_arc:
-                    print(f"ERROR: Viterbi path tracking found no arc for token '{tokens[token_idx]}' at state {curr_state}.", file=sys.stderr)
-                    return tokens # Return original tokens on failure
-
-                (in_sym, out_sym), next_state = best_arc
-                if out_sym != Sym("ε"):  # Exclude epsilon symbols
-                    annotated_tokens.append(str(out_sym))
-                curr_state = next_state
-                token_idx += 1
             
-            # If path is shorter than tokens (e.g. due to epsilons), it's an issue.
-            if len(annotated_tokens) != len(tokens):
-                print(f"WARNING: Annotation length ({len(annotated_tokens)}) differs from token length ({len(tokens)}). Returning original tokens.", file=sys.stderr)
-                return tokens
-
             return annotated_tokens
-        else:
-            # No valid path to a final state exists (string is rejected).
-            # Perform a greedy forward pass to annotate the longest valid prefix.
-            annotated_tokens = []
-            try:
-                # Assume a single initial state for simplicity
-                curr_state = next(composed_fst.I)[0]
-                
-                for i, token_str in enumerate(tokens):
-                    token_sym = Sym(token_str)
-                    
-                    found_arc = False
-                    # Find the first arc that matches the current token
-                    for (in_sym, out_sym), next_state, arc_weight in composed_fst.arcs(curr_state):
-                        if in_sym == token_sym:
-                            annotated_tokens.append(str(out_sym))
-                            curr_state = next_state
-                            found_arc = True
-                            break
-                    
-                    if not found_arc:
-                        # We are stuck. Append the rest of the original tokens and stop.
-                        annotated_tokens.extend(tokens[i:])
-                        break
-                
-                return annotated_tokens
 
-            except StopIteration:
-                # No initial state in composed_fst, return original tokens.
-                return tokens
+        except StopIteration:
+            # No initial state in composed_fst, return original tokens.
+            return tokens
 
     except Exception as e:
         # Added detailed error logging
