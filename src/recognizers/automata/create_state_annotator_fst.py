@@ -1,4 +1,3 @@
-
 import argparse
 import sys
 import torch
@@ -11,6 +10,22 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from recognizers.automata.finite_automaton import FiniteAutomatonContainer
 from rayuela.fsa.fst import FST
 from rayuela.base.semiring import Tropical
+
+def get_state_index(state_obj):
+    """Robustly extracts an integer index from various state representations."""
+    if isinstance(state_obj, int):
+        return state_obj
+    if isinstance(state_obj, State):
+        # Recursively handle nested State objects or other types in idx
+        return get_state_index(state_obj.idx)
+    if isinstance(state_obj, tuple) and len(state_obj) > 0:
+        # Assumes the index is the first element of the tuple, e.g., (index, weight)
+        return get_state_index(state_obj[0])
+    try:
+        # Final attempt to cast to int
+        return int(state_obj)
+    except (ValueError, TypeError):
+        raise TypeError(f"Could not extract integer index from state: {state_obj} (type: {type(state_obj)})")
 
 def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alphabet: list[str] | None = None):
     """
@@ -46,53 +61,29 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alp
     # Build the serializable data dictionary for the annotator FST
     print("Extracting data to build FST...")
     
-    # Ensure all states are properly represented as State(int) and extract their int indices
-    # This loop will filter out raw ints and fix recursive State objects if any
-    cleaned_states_set = set()
-    for s in fsa.Q:
-        if isinstance(s, State):
-            cleaned_states_set.add(int(s.idx))
-        elif isinstance(s, int):
-            cleaned_states_set.add(s)
-        else:
-            # Handle other unexpected types if necessary, or raise an error
-            raise TypeError(f"Unexpected state type in fsa.Q: {type(s)}")
-    states_int_idx = sorted(list(cleaned_states_set))
+    # Use the helper function to robustly get integer indices for all states
+    states_int_idx = sorted(list({get_state_index(s) for s in fsa.Q}))
 
     initial_state_int_idx = None
     initial_state_tuple = next(fsa.I, None)
     if initial_state_tuple:
         q, w = initial_state_tuple
-        if isinstance(q, State):
-            initial_state_int_idx = int(q.idx)
-        elif isinstance(q, int):
-            initial_state_int_idx = q
+        initial_state_int_idx = get_state_index(q)
 
-    final_states_int_idx = []
-    for q, w in fsa.F:
-        if isinstance(q, State):
-            final_states_int_idx.append(int(q.idx))
-        elif isinstance(q, int):
-            final_states_int_idx.append(q)
+    final_states_int_idx = [get_state_index(q) for q, w in fsa.F]
 
     arcs_data = []
     for p_obj in fsa.Q:
-        p_idx = None
-        if isinstance(p_obj, State):
-            p_idx = int(p_obj.idx)
-        elif isinstance(p_obj, int):
-            p_idx = p_obj
-        else:
-            continue # Skip unexpected types
+        try:
+            p_idx = get_state_index(p_obj)
+        except TypeError:
+            continue # Skip states we can't index
 
         for i_sym, q_obj, w_semiring in fsa.arcs(p_obj):
-            q_idx = None
-            if isinstance(q_obj, State):
-                q_idx = int(q_obj.idx)
-            elif isinstance(q_obj, int):
-                q_idx = q_obj
-            else:
-                continue # Skip unexpected types
+            try:
+                q_idx = get_state_index(q_obj)
+            except TypeError:
+                continue # Skip arcs to states we can't index
 
             output_label = f"{i_sym}_{p_idx}"
             # Check if the next state (q_idx) is a final state
