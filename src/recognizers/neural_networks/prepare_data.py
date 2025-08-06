@@ -98,8 +98,39 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
         best_path_semiring = pathsum_obj.pathsum(Strategy.VITERBI) # Viterbi for shortest path in Tropical semiring
         print(f"DEBUG: Best path semiring value: {best_path_semiring}")
         if best_path_semiring != annotator_fst.R.zero:
-            return [f"{t}_annotated" for t in tokens] # Placeholder: Replace with actual path extraction
+            # Pathsum object can give us the best path as a new FSA
+            best_path_fsa = pathsum_obj.best_path()
+            
+            if best_path_fsa.num_states == 0:
+                # Should not happen if best_path_semiring is not zero, but as a safeguard
+                return tokens
+
+            annotated_tokens = []
+            # There should be only one initial state in the best_path FSA
+            try:
+                q = next(best_path_fsa.I)[0]
+            except StopIteration:
+                return tokens # No initial state, no path
+
+            # Walk the single path in the FSA and collect the output symbols
+            while True:
+                # In the best_path FSA, each state (except the last) has exactly one outgoing arc
+                arcs = list(best_path_fsa.arcs(q))
+                if not arcs:
+                    break  # Reached the final state of the path
+
+                (_input_sym, output_sym), next_q, _weight = arcs[0]
+                
+                # We collect the output symbols from the composition, which are the annotations
+                if output_sym != Sym("ε"):  # Assuming ε is the epsilon symbol
+                    annotated_tokens.append(str(output_sym))
+                
+                q = next_q
+            
+            # If for some reason no tokens were collected, return original
+            return annotated_tokens if annotated_tokens else tokens
         else:
+            # No path was found in the composed FST
             return tokens
 
     except Exception as e:
