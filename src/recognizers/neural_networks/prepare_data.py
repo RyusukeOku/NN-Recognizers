@@ -156,8 +156,35 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
             
             return annotated_tokens
         else:
-            # No path was found in the composed FST, return original tokens.
-            return tokens
+            # No valid path to a final state exists (string is rejected).
+            # Perform a greedy forward pass to annotate the longest valid prefix.
+            annotated_tokens = []
+            try:
+                # Assume a single initial state for simplicity
+                curr_state = next(composed_fst.I)[0]
+                
+                for i, token_str in enumerate(tokens):
+                    token_sym = Sym(token_str)
+                    
+                    found_arc = False
+                    # Find the first arc that matches the current token
+                    for (in_sym, out_sym), next_state, arc_weight in composed_fst.arcs(curr_state):
+                        if in_sym == token_sym:
+                            annotated_tokens.append(str(out_sym))
+                            curr_state = next_state
+                            found_arc = True
+                            break
+                    
+                    if not found_arc:
+                        # We are stuck. Append the rest of the original tokens and stop.
+                        annotated_tokens.extend(tokens[i:])
+                        break
+                
+                return annotated_tokens
+
+            except StopIteration:
+                # No initial state in composed_fst, return original tokens.
+                return tokens
 
     except Exception as e:
         # Added detailed error logging
