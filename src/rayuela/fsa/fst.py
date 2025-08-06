@@ -8,6 +8,8 @@ from rayuela.base.symbol import Sym, ε, ε_1, ε_2
 from rayuela.fsa.fsa import FSA
 from rayuela.base.state import PairState, State
 
+import sys
+
 
 class FST(FSA):
     def __init__(self, R=Boolean):
@@ -305,7 +307,7 @@ class FST(FSA):
             print(f"DEBUG (_compose): Popped from stack: q={q}, p={p}", file=sys.stderr) # 追加
 
             for ((a, b), qʼ, w1), ((c, d), pʼ, w2) in product(self.arcs(q), T.arcs(p)):
-                print(f"DEBUG (_compose): Checking arcs: self_arc=({a}, {b}, {qʼ}, {w1}), T_arc=({c}, {d}, {pʼ}, {w2})", file=sys.stderr) # 追加
+                print(f"DEBUG (_compose): Comparing b={b} (type={type(b)}, id={id(b)}, repr={repr(b)}) and c={c} (type={type(c)}, id={id(c)}, repr={repr(c)})", file=sys.stderr) # 追加
                 if b != c:
                     print(f"DEBUG (_compose): Output-Input mismatch: b={b}, c={c}. Skipping.", file=sys.stderr) # 追加
                     continue
