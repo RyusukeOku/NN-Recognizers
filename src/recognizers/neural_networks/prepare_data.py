@@ -104,12 +104,12 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
 
             # 2. Find the best initial state to start the path from.
             start_state = None
-            min_weight = annotator_fst.R.one  # Represents infinity in Tropical semiring
+            # In a Tropical semiring with all 0-cost paths, any initial state that can
+            # reach a final state is a valid start. We can just pick the first one.
             for q, w in composed_fst.I:
-                path_weight = w * beta[q]
-                if path_weight < min_weight:
-                    min_weight = path_weight
+                if beta[q] != annotator_fst.R.one: # Check if the state can reach a final state
                     start_state = q
+                    break # Found a valid start state, no need to check others
             
             if start_state is None:
                 return tokens # Should not happen if a path was found
