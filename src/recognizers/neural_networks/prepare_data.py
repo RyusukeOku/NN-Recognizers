@@ -98,39 +98,65 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
         best_path_semiring = pathsum_obj.pathsum(Strategy.VITERBI) # Viterbi for shortest path in Tropical semiring
         print(f"DEBUG: Best path semiring value: {best_path_semiring}")
         if best_path_semiring != annotator_fst.R.zero:
-            # Pathsum object can give us the best path as a new FSA
-            best_path_fsa = pathsum_obj.best_path()
-            
-            if best_path_fsa.num_states == 0:
-                # Should not happen if best_path_semiring is not zero, but as a safeguard
-                return tokens
+            # Path exists, so we reconstruct it.
+            # 1. Compute backward Viterbi scores (beta values).
+            beta = pathsum_obj.backward(Strategy.VITERBI)
 
+            # 2. Find the best initial state to start the path from.
+            start_state = None
+            min_weight = annotator_fst.R.one  # Represents infinity in Tropical semiring
+            for q, w in composed_fst.I:
+                path_weight = w * beta[q]
+                if path_weight < min_weight:
+                    min_weight = path_weight
+                    start_state = q
+            
+            if start_state is None:
+                return tokens # Should not happen if a path was found
+
+            # 3. Walk forward from the best start state, guided by beta scores.
             annotated_tokens = []
-            # There should be only one initial state in the best_path FSA
-            try:
-                q = next(best_path_fsa.I)[0]
-            except StopIteration:
-                return tokens # No initial state, no path
+            curr_state = start_state
+            final_states = {q for q, w in composed_fst.F}
 
-            # Walk the single path in the FSA and collect the output symbols
-            while True:
-                # In the best_path FSA, each state (except the last) has exactly one outgoing arc
-                arcs = list(best_path_fsa.arcs(q))
+            # The path is guaranteed to end, but we add a safeguard for safety.
+            for _ in range(composed_fst.num_states + 1):
+                if curr_state in final_states and not any(composed_fst.arcs(curr_state)):
+                    break
+
+                best_arc = None
+                min_arc_weight = annotator_fst.R.one  # Infinity
+
+                # Find the best outgoing arc that minimizes the path cost
+                arcs = list(composed_fst.arcs(curr_state))
                 if not arcs:
-                    break  # Reached the final state of the path
+                    # Reached a state with no outgoing arcs, must be a final state.
+                    if curr_state in final_states:
+                        break
+                    else:
+                        # This indicates a dead end before a final state, which shouldn't happen on a valid path.
+                        print(f"ERROR: Viterbi path forward tracking failed at non-final state {curr_state}.", file=sys.stderr)
+                        return tokens
 
-                (_input_sym, output_sym), next_q, _weight = arcs[0]
-                
-                # We collect the output symbols from the composition, which are the annotations
-                if output_sym != Sym("ε"):  # Assuming ε is the epsilon symbol
-                    annotated_tokens.append(str(output_sym))
-                
-                q = next_q
+                for (in_sym, out_sym), next_state, arc_weight in arcs:
+                    path_weight_through_arc = arc_weight * beta[next_state]
+                    if path_weight_through_arc < min_arc_weight:
+                        min_arc_weight = path_weight_through_arc
+                        best_arc = ((in_sym, out_sym), next_state)
+
+                if best_arc is None:
+                    # This case should ideally not be reached if arcs exist.
+                    print("ERROR: Viterbi path forward tracking failed to select an arc.", file=sys.stderr)
+                    return tokens
+
+                (in_sym, out_sym), next_state = best_arc
+                if out_sym != Sym("ε"):  # Exclude epsilon symbols from the output
+                    annotated_tokens.append(str(out_sym))
+                curr_state = next_state
             
-            # If for some reason no tokens were collected, return original
-            return annotated_tokens if annotated_tokens else tokens
+            return annotated_tokens
         else:
-            # No path was found in the composed FST
+            # No path was found in the composed FST, return original tokens.
             return tokens
 
     except Exception as e:
