@@ -271,14 +271,22 @@ def main():
 
     # Build vocabulary from all datasets
     if annotator:
-        print("Building vocabulary from annotated tokens across all datasets...")
+        print("Building vocabulary from original and annotated tokens across all datasets...")
         all_token_types = set()
         all_has_unk = False
         for strings_files, _, _ in prepared_files:
-            types, has_unk = get_annotated_token_types_in_file(strings_files[0], unk_string, annotator)
-            all_token_types.update(types)
-            if has_unk:
+            # First, add all original tokens from the file to the vocabulary
+            original_types, original_has_unk = get_token_types_in_file(strings_files[0], unk_string)
+            all_token_types.update(original_types)
+            if original_has_unk:
                 all_has_unk = True
+            
+            # Second, add all annotated tokens from the same file
+            annotated_types, annotated_has_unk = get_annotated_token_types_in_file(strings_files[0], unk_string, annotator)
+            all_token_types.update(annotated_types)
+            if annotated_has_unk:
+                all_has_unk = True
+
         token_types, has_unk = all_token_types, all_has_unk
     elif args.use_next_symbols:
         token_types, has_unk = get_token_types_in_next_symbols_file(training_files[2][0], unk_string)
