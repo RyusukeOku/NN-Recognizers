@@ -119,41 +119,50 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
             curr_state = start_state
             final_states = {q for q, w in composed_fst.F}
 
-            # The path is guaranteed to end, but we add a safeguard for safety.
-            for _ in range(composed_fst.num_states + 1):
+            # Match the path against the original tokens
+            token_idx = 0
+            while token_idx < len(tokens):
                 if curr_state in final_states and not any(composed_fst.arcs(curr_state)):
                     break
 
                 best_arc = None
                 min_arc_weight = annotator_fst.R.one  # Infinity
+                current_token_sym = Sym(tokens[token_idx])
 
-                # Find the best outgoing arc that minimizes the path cost
+                # Find the best outgoing arc that matches the current token
                 arcs = list(composed_fst.arcs(curr_state))
                 if not arcs:
-                    # Reached a state with no outgoing arcs, must be a final state.
                     if curr_state in final_states:
                         break
                     else:
-                        # This indicates a dead end before a final state, which shouldn't happen on a valid path.
-                        print(f"ERROR: Viterbi path forward tracking failed at non-final state {curr_state}.", file=sys.stderr)
-                        return tokens
+                        print(f"ERROR: Viterbi path tracking stuck at non-final state {curr_state}.", file=sys.stderr)
+                        return tokens # Return original tokens on failure
 
+                found_matching_arc = False
                 for (in_sym, out_sym), next_state, arc_weight in arcs:
-                    path_weight_through_arc = arc_weight * beta[next_state]
-                    if path_weight_through_arc < min_arc_weight:
-                        min_arc_weight = path_weight_through_arc
-                        best_arc = ((in_sym, out_sym), next_state)
-
-                if best_arc is None:
-                    # This case should ideally not be reached if arcs exist.
-                    print("ERROR: Viterbi path forward tracking failed to select an arc.", file=sys.stderr)
-                    return tokens
+                    # The input symbol in the composed FST must match the original token
+                    if in_sym == current_token_sym:
+                        found_matching_arc = True
+                        path_weight_through_arc = arc_weight * beta[next_state]
+                        if path_weight_through_arc < min_arc_weight:
+                            min_arc_weight = path_weight_through_arc
+                            best_arc = ((in_sym, out_sym), next_state)
+                
+                if not found_matching_arc:
+                    print(f"ERROR: Viterbi path tracking found no arc for token '{tokens[token_idx]}' at state {curr_state}.", file=sys.stderr)
+                    return tokens # Return original tokens on failure
 
                 (in_sym, out_sym), next_state = best_arc
-                if out_sym != Sym("ε"):  # Exclude epsilon symbols from the output
+                if out_sym != Sym("ε"):  # Exclude epsilon symbols
                     annotated_tokens.append(str(out_sym))
                 curr_state = next_state
+                token_idx += 1
             
+            # If path is shorter than tokens (e.g. due to epsilons), it's an issue.
+            if len(annotated_tokens) != len(tokens):
+                print(f"WARNING: Annotation length ({len(annotated_tokens)}) differs from token length ({len(tokens)}). Returning original tokens.", file=sys.stderr)
+                return tokens
+
             return annotated_tokens
         else:
             # No valid path to a final state exists (string is rejected).
@@ -325,12 +334,19 @@ def main():
 
     unk_string = None if args.never_allow_unk else args.unk_string
 
-    # Build vocabulary
-    if args.use_next_symbols:
+    # Build vocabulary from all datasets
+    if annotator:
+        print("Building vocabulary from annotated tokens across all datasets...")
+        all_token_types = set()
+        all_has_unk = False
+        for strings_files, _, _ in prepared_files:
+            types, has_unk = get_annotated_token_types_in_file(strings_files[0], unk_string, annotator)
+            all_token_types.update(types)
+            if has_unk:
+                all_has_unk = True
+        token_types, has_unk = all_token_types, all_has_unk
+    elif args.use_next_symbols:
         token_types, has_unk = get_token_types_in_next_symbols_file(training_files[2][0], unk_string)
-    elif annotator:
-        print("Building vocabulary from annotated tokens...")
-        token_types, has_unk = get_annotated_token_types_in_file(training_files[0][0], unk_string, annotator)
     else:
         token_types, has_unk = get_token_types_in_file(training_files[0][0], unk_string)
     
