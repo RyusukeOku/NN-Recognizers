@@ -1,8 +1,8 @@
-
 import argparse
 import sys
 import torch
 from pathlib import Path
+from rayuela.base.state import State
 
 # Add src directory to Python path to allow importing recognizers module
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -10,6 +10,22 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from recognizers.automata.finite_automaton import FiniteAutomatonContainer
 from rayuela.fsa.fst import FST
 from rayuela.base.semiring import Tropical
+
+def get_state_index(state_obj):
+    """Robustly extracts an integer index from various state representations."""
+    if isinstance(state_obj, int):
+        return state_obj
+    if isinstance(state_obj, State):
+        # Recursively handle nested State objects or other types in idx
+        return get_state_index(state_obj.idx)
+    if isinstance(state_obj, tuple) and len(state_obj) > 0:
+        # Assumes the index is the first element of the tuple, e.g., (index, weight)
+        return get_state_index(state_obj[0])
+    try:
+        # Final attempt to cast to int
+        return int(state_obj)
+    except (ValueError, TypeError):
+        raise TypeError(f"Could not extract integer index from state: {state_obj} (type: {type(state_obj)})")
 
 def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alphabet: list[str] | None = None):
     """
@@ -44,23 +60,42 @@ def create_state_annotator_fst_from_pt(pt_path: str, fst_path: str, explicit_alp
 
     # Build the serializable data dictionary for the annotator FST
     print("Extracting data to build FST...")
-    states = list(fsa.Q)
-    initial_state = next(fsa.I, None)
-    final_states = list(fsa.F)
-    arcs = []
-    for p in states:
-        for i, q, w in fsa.arcs(p):
-            output_label = f"{i}_{p}"
-            # Check if the next state (q) is a final state
-            if q in final_states:
+    
+    # Use the helper function to robustly get integer indices for all states
+    states_int_idx = sorted(list({get_state_index(s) for s in fsa.Q}))
+
+    initial_state_int_idx = None
+    initial_state_tuple = next(fsa.I, None)
+    if initial_state_tuple:
+        q, w = initial_state_tuple
+        initial_state_int_idx = get_state_index(q)
+
+    final_states_int_idx = [get_state_index(q) for q, w in fsa.F]
+
+    arcs_data = []
+    for p_obj in fsa.Q:
+        try:
+            p_idx = get_state_index(p_obj)
+        except TypeError:
+            continue # Skip states we can't index
+
+        for i_sym, q_obj, w_semiring in fsa.arcs(p_obj):
+            try:
+                q_idx = get_state_index(q_obj)
+            except TypeError:
+                continue # Skip arcs to states we can't index
+
+            output_label = f"{i_sym}_{p_idx}"
+            # Check if the next state (q_idx) is a final state
+            if q_idx in final_states_int_idx:
                 output_label = f"{output_label}_F"
-            arcs.append((p, i, output_label, q, w.value))
+            arcs_data.append((p_idx, str(i_sym), output_label, q_idx, w_semiring.value))
 
     fst_data = {
-        'states': states,
-        'initial_state': initial_state,
-        'final_states': final_states,
-        'arcs': arcs,
+        'states': states_int_idx,
+        'initial_state': initial_state_int_idx,
+        'final_states': final_states_int_idx,
+        'arcs': arcs_data,
         'semiring_type': 'tropical'
     }
 

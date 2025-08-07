@@ -8,6 +8,8 @@ from rayuela.base.symbol import Sym, ε, ε_1, ε_2
 from rayuela.fsa.fsa import FSA
 from rayuela.base.state import PairState, State
 
+import sys
+
 
 class FST(FSA):
     def __init__(self, R=Boolean):
@@ -285,8 +287,11 @@ class FST(FSA):
 
         # add initial states
         T_c = FST(R=self.R)
+
+
         for (q, w1), (p, w2) in product(self.I, T.I):
             T_c.add_I(PairState(q, p), w=w1 * w2)
+
 
         I1, I2 = {q: w for q, w in self.I}, {q: w for q, w in T.I}
         F1, F2 = {q: w for q, w in self.F}, {q: w for q, w in T.F}
@@ -294,18 +299,25 @@ class FST(FSA):
         visited = set([(i1, i2) for i1, i2 in product(I1, I2)])
         stack = [(i1, i2) for i1, i2 in product(I1, I2)]
 
+
+
         while stack:
             q, p = stack.pop()
 
+
             for ((a, b), qʼ, w1), ((c, d), pʼ, w2) in product(self.arcs(q), T.arcs(p)):
+
                 if b != c:
+
                     continue
 
                 T_c.add_arc(PairState(q, p), a, d, PairState(qʼ, pʼ), w=w1 * w2)
 
+
                 if (qʼ, pʼ) not in visited:
                     stack.append((qʼ, pʼ))
                     visited.add((qʼ, pʼ))
+
 
         # final state handling
         for q, p in product(F1, F2):
