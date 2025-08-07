@@ -123,7 +123,7 @@ def annotate_string(tokens: list[str], annotator_fst: FST) -> list[str]:
                     # We are stuck. Append the rest of the original tokens and stop.
                     annotated_tokens.extend(tokens[i:])
                     break
-            
+            print(f"current annotated tokens: {annotated_tokens}")
             return annotated_tokens
 
         except StopIteration:

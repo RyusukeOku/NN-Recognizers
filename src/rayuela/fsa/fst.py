@@ -287,12 +287,11 @@ class FST(FSA):
 
         # add initial states
         T_c = FST(R=self.R)
-        print(f"DEBUG (_compose): Starting composition. self: {self}, T: {T}", file=sys.stderr) # 追加
-        print(f"DEBUG (_compose): self.I: {list(self.I)}, T.I: {list(T.I)}", file=sys.stderr) # 追加
+
 
         for (q, w1), (p, w2) in product(self.I, T.I):
             T_c.add_I(PairState(q, p), w=w1 * w2)
-            print(f"DEBUG (_compose): Added initial state: {PairState(q, p)} with weight {w1 * w2}", file=sys.stderr) # 追加
+
 
         I1, I2 = {q: w for q, w in self.I}, {q: w for q, w in T.I}
         F1, F2 = {q: w for q, w in self.F}, {q: w for q, w in T.F}
@@ -300,32 +299,30 @@ class FST(FSA):
         visited = set([(i1, i2) for i1, i2 in product(I1, I2)])
         stack = [(i1, i2) for i1, i2 in product(I1, I2)]
 
-        print(f"DEBUG (_compose): Initial stack: {stack}", file=sys.stderr) # 追加
+
 
         while stack:
             q, p = stack.pop()
-            print(f"DEBUG (_compose): Popped from stack: q={q}, p={p}", file=sys.stderr) # 追加
+
 
             for ((a, b), qʼ, w1), ((c, d), pʼ, w2) in product(self.arcs(q), T.arcs(p)):
-                print(f"DEBUG (_compose): Comparing b={b} (type={type(b)}, id={id(b)}, repr={repr(b)}) and c={c} (type={type(c)}, id={id(c)}, repr={repr(c)})", file=sys.stderr) # 追加
+
                 if b != c:
-                    print(f"DEBUG (_compose): Output-Input mismatch: b={b}, c={c}. Skipping.", file=sys.stderr) # 追加
+
                     continue
 
                 T_c.add_arc(PairState(q, p), a, d, PairState(qʼ, pʼ), w=w1 * w2)
-                print(f"DEBUG (_compose): Added arc: {PairState(q, p)} --({a}, {d})--> {PairState(qʼ, pʼ)} with weight {w1 * w2}", file=sys.stderr) # 追加
+
 
                 if (qʼ, pʼ) not in visited:
                     stack.append((qʼ, pʼ))
                     visited.add((qʼ, pʼ))
-                    print(f"DEBUG (_compose): Added to stack: {PairState(qʼ, pʼ)}", file=sys.stderr) # 追加
+
 
         # final state handling
         for q, p in product(F1, F2):
             T_c.set_F(PairState(q, p), w=F1[q] * F2[p])
-            print(f"DEBUG (_compose): Added final state: {PairState(q, p)} with weight {F1[q] * F2[p]}", file=sys.stderr) # 追加
 
-        print(f"DEBUG (_compose): Composition finished. Resulting FST num_states: {T_c.num_states}", file=sys.stderr) # 追加
         return T_c
 
     def compose(self, fst: "FST", augment: bool = True) -> "FST":

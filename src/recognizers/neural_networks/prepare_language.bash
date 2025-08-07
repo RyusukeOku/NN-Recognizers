@@ -62,7 +62,9 @@ python src/recognizers/neural_networks/prepare_data.py \
   --more-data validation-long \
   --more-data test \
   "${flags[@]}" \
-  "${annotation_flags[@]}" \
   --never-allow-unk \
-  --use-next-symbols
+  --use-next-symbols \
+  --use-state-annotations \
+  --fst-annotator-path "$language_dir"/annotator.fst \
+  # "${annotation_flags[@]}" \
 

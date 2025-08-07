@@ -2,7 +2,7 @@ import argparse
 import sys
 import torch
 from pathlib import Path
-from rayuela.fsa.state import State
+from rayuela.base.state import State
 
 # Add src directory to Python path to allow importing recognizers module
 sys.path.append(str(Path(__file__).parent.parent.parent))

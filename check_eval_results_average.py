@@ -79,7 +79,7 @@ def collect_results(base_models_dir):
     return pd.DataFrame(results)
 
 def main():
-    base_models_directory = "data/models"
+    base_models_directory = "data/models_annotation"
     mean_output_csv_path = "results/eval_results_mean_summary_annotation_with_F.csv"
     
     df_results = collect_results(base_models_directory)
