@@ -13,15 +13,54 @@ from recognizers.tools.jsonl import write_json_line
 from recognizers.neural_networks.data import load_prepared_data_from_directory
 from recognizers.neural_networks.model_interface import RecognitionModelInterface
 from recognizers.neural_networks.training_loop import generate_batches, get_loss_terms
+from recognizers.automata.format_checker_fsa import get_format_checker_fsa
+from rayuela.fsa.fsa import FSA
 
-def evaluate(model, model_interface, batches, num_examples):
+def evaluate(model, model_interface, batches, num_examples, fsa_filter: FSA = None):
     device = model_interface.get_device(None)
     example_scores = [None] * num_examples
     model.eval()
+
     with torch.inference_mode():
         for indexed_batch in batches:
-            batch = [(x, d) for x, (i, d) in indexed_batch]
+            if fsa_filter:
+                batch_strings = [x for x, (i, d) in indexed_batch]
+                fsa_results = [fsa_filter.accept(s) for s in batch_strings]
+                
+                accepted_indexed_batch = []
+
+                for i, result in enumerate(fsa_results):
+                    original_index = indexed_batch[i][1][0]
+                    if result == fsa_filter.R.one:
+                        accepted_indexed_batch.append(indexed_batch[i])
+                    else:
+                        # 形式不一致の場合、NNが「不受理」と判断したのと同じ扱いにする
+                        true_label_is_accepted = indexed_batch[i][1][1][0]
+                        
+                        # 形式不一致 ＝ 不受理という予測
+                        predicted_label_is_accepted = False
+
+                        # 予測と正解ラベルが一致しているか
+                        is_correct = (true_label_is_accepted == predicted_label_is_accepted)
+                        
+                        accuracy_numerator = 1.0 if is_correct else 0.0
+                        loss_numerator = 0.0 if is_correct else math.inf
+
+                        example_scores[original_index] = {
+                            'loss': (loss_numerator, 1),
+                            'accuracy': (accuracy_numerator, 1)
+                        }
+
+                if not accepted_indexed_batch:
+                    continue
+                
+                batch_to_process = accepted_indexed_batch
+            else:
+                batch_to_process = indexed_batch
+
+            batch = [(x, d) for x, (i, d) in batch_to_process]
             prepared_batch = model_interface.prepare_batch(batch, device)
+
             batch_score_dict = get_loss_terms(
                 model,
                 model_interface,
@@ -31,9 +70,12 @@ def evaluate(model, model_interface, batches, num_examples):
                 label_smoothing_factor=0.0,
                 include_accuracy=True
             )
+            
             example_score_dicts = split_score_dict(batch, batch_score_dict)
-            for (x, (i, d)), example_score_dict in zip(indexed_batch, example_score_dicts):
+            
+            for (x, (i, d)), example_score_dict in zip(batch_to_process, example_score_dicts):
                 example_scores[i] = example_score_dict
+
     return example_scores
 
 class DictScoreAccumulator:
@@ -103,9 +145,21 @@ def main():
         help='The maximum number of tokens allowed per batch.')
     model_interface.add_arguments(parser)
     model_interface.add_forward_arguments(parser)
+    parser.add_argument('--use-fsa-filter', action='store_true',
+        help='Enable FSA-based pre-filtering of input strings for evaluation.')
     args = parser.parse_args()
 
     saver = model_interface.construct_saver(args)
+
+    fsa_filter = None
+    if args.use_fsa_filter:
+        language_name = args.training_data.name
+        fsa_filter = get_format_checker_fsa(language_name)
+        if fsa_filter:
+            print(f'Using FSA format filter for language: {language_name}')
+        else:
+            print(f'No FSA format filter found for language: {language_name}. Proceeding without filter.')
+
     for dataset in args.datasets:
         if dataset == 'training':
             input_directory = args.training_data
@@ -117,7 +171,7 @@ def main():
         )
         examples = [(x, (i, d)) for i, (x, d) in enumerate(examples)]
         batches = generate_batches(examples, args.batching_max_tokens)
-        scores = evaluate(saver.model, model_interface, batches, len(examples))
+        scores = evaluate(saver.model, model_interface, batches, len(examples), fsa_filter=fsa_filter)
         accumulator = DictScoreAccumulator()
         example_scores_path = args.output / f'{dataset}.jsonl'
         print(f'writing {example_scores_path}')

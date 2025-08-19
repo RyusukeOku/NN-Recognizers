@@ -71,7 +71,7 @@ def main():
         model_size_in_bytes = None
 
     # Load the data.
-    training_data, validation_data, vocabulary \
+    training_data, validation_data, vocabulary 
         = load_prepared_data(args, parser, vocabulary_data, model_interface)
 
     # Start logging events to disk.
