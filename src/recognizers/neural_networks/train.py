@@ -1,11 +1,13 @@
 import argparse
 import logging
 import sys
+import pathlib
 
 import humanfriendly
 
 from rau.tools.torch.profile import get_current_memory
 
+from recognizers.automata.format_checker import check_string_format
 from recognizers.neural_networks.data import (
     add_data_arguments,
     load_prepared_data,
@@ -17,6 +19,7 @@ from recognizers.neural_networks.training_loop import (
     add_training_loop_arguments,
     get_training_loop_kwargs,
 )
+
 
 def main():
 
@@ -37,6 +40,8 @@ def main():
     model_interface.add_arguments(parser)
     model_interface.add_forward_arguments(parser)
     add_training_loop_arguments(parser)
+    parser.add_argument('--use-format-filter', action='store_true',
+        help='Enable regex-based pre-filtering of input strings for training.')
     args = parser.parse_args()
     console_logger.info(f'parsed arguments: {args}')
 
@@ -73,6 +78,23 @@ def main():
     # Load the data.
     training_data, validation_data, vocabulary 
         = load_prepared_data(args, parser, vocabulary_data, model_interface)
+
+    if args.use_format_filter:
+        console_logger.info('Format filter is enabled. Filtering training data.')
+        language_name = args.training_data.name
+        
+        original_count = len(training_data)
+        training_data = [
+            example for example in training_data
+            if check_string_format(language_name, example[0])
+        ]
+        new_count = len(training_data)
+        if original_count > new_count:
+            console_logger.info(
+                f'Filtered training data from {original_count} to {new_count} examples.'
+            )
+        else:
+            console_logger.info('No training examples were filtered.')
 
     # Start logging events to disk.
     with saver.logger() as event_logger:
