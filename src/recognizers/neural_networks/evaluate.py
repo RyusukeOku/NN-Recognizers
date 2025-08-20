@@ -15,7 +15,7 @@ from recognizers.neural_networks.model_interface import RecognitionModelInterfac
 from recognizers.neural_networks.training_loop import generate_batches, get_loss_terms
 from recognizers.automata.format_checker import check_string_format
 
-def evaluate(model, model_interface, batches, num_examples, language_name: str = None):
+def evaluate(model, model_interface, batches, num_examples, language_name: str = None, vocabulary = None):
     device = model_interface.get_device(None)
     example_scores = [None] * num_examples
     model.eval()
@@ -26,8 +26,11 @@ def evaluate(model, model_interface, batches, num_examples, language_name: str =
             accepted_indexed_batch = []
 
             if language_name:
+                input_vocab = vocabulary.input_vocab
                 for i, (x, (original_index, (true_label, _))) in enumerate(indexed_batch):
-                    if check_string_format(language_name, x):
+                    # Convert tensor of IDs to a space-separated string of tokens
+                    input_string = ' '.join(input_vocab.lookup_tokens(x))
+                    if check_string_format(language_name, input_string):
                         accepted_indexed_batch.append(indexed_batch[i])
                     else:
                         # 形式不一致の場合、NNが「不受理」と判断したのと同じ扱いにする
@@ -43,6 +46,8 @@ def evaluate(model, model_interface, batches, num_examples, language_name: str =
                         }
                 
                 if not accepted_indexed_batch:
+                    # このバッチの全サンプルが形式不一致だった場合、スコアはすべて計算済み
+                    # なので、ループの残りをスキップして次のバッチへ
                     continue
                 batch_to_process = accepted_indexed_batch
 
@@ -140,6 +145,8 @@ def main():
     saver = model_interface.construct_saver(args)
 
     language_name = args.training_data.name if args.use_format_filter else None
+    vocabulary = saver.model.vocabulary if language_name else None
+
     if language_name:
         print(f'Format filter is enabled for language: {language_name}')
 
@@ -154,7 +161,14 @@ def main():
         )
         examples = [(x, (i, d)) for i, (x, d) in enumerate(examples)]
         batches = generate_batches(examples, args.batching_max_tokens)
-        scores = evaluate(saver.model, model_interface, batches, len(examples), language_name=language_name)
+        scores = evaluate(
+            saver.model,
+            model_interface,
+            batches,
+            len(examples),
+            language_name=language_name,
+            vocabulary=vocabulary
+        )
         accumulator = DictScoreAccumulator()
         example_scores_path = args.output / f'{dataset}.jsonl'
         print(f'writing {example_scores_path}')

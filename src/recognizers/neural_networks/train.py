@@ -76,19 +76,26 @@ def main():
         model_size_in_bytes = None
 
     # Load the data.
-    training_data, validation_data, vocabulary 
-        = load_prepared_data(args, parser, vocabulary_data, model_interface)
+    training_data, validation_data, vocabulary = load_prepared_data(args, parser, vocabulary_data, model_interface)
 
     if args.use_format_filter:
         console_logger.info('Format filter is enabled. Filtering training data.')
         language_name = args.training_data.name
         
+        input_vocab = vocabulary.input_vocab
         original_count = len(training_data)
-        training_data = [
-            example for example in training_data
-            if check_string_format(language_name, example[0])
-        ]
+        
+        filtered_training_data = []
+        for example in training_data:
+            tensor = example[0]
+            # Convert tensor of IDs to a space-separated string of tokens
+            input_string = ' '.join(input_vocab.lookup_tokens(tensor))
+            if check_string_format(language_name, input_string):
+                filtered_training_data.append(example)
+        
+        training_data = filtered_training_data
         new_count = len(training_data)
+
         if original_count > new_count:
             console_logger.info(
                 f'Filtered training data from {original_count} to {new_count} examples.'
