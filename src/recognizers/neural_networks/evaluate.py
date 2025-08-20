@@ -29,7 +29,7 @@ def evaluate(model, model_interface, batches, num_examples, language_name: str =
                 input_vocab = vocabulary.input_vocab
                 for i, (x, (original_index, (true_label, _))) in enumerate(indexed_batch):
                     # Convert tensor of IDs to a space-separated string of tokens
-                    input_string = ' '.join(input_vocab.lookup_tokens(x))
+                    input_string = input_vocab.to_string(x)
                     if check_string_format(language_name, input_string):
                         accepted_indexed_batch.append(indexed_batch[i])
                     else:
