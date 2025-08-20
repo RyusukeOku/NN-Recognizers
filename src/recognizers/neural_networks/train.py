@@ -89,7 +89,7 @@ def main():
         for example in training_data:
             tensor = example[0]
             # Convert tensor of IDs to a space-separated string of tokens
-            input_string = input_vocab.to_string(tensor)
+            input_string = ' '.join([input_vocab.to_string(i.item()) for i in tensor])
             if check_string_format(language_name, input_string):
                 filtered_training_data.append(example)
         
