@@ -32,4 +32,7 @@ def check_string_format(language_name: str, input_string: str) -> bool:
     if pattern is None:
         return True
     
-    return re.fullmatch(pattern, input_string) is not None
+    # Remove spaces from the string before matching to handle tokenized inputs.
+    processed_string = input_string.replace(' ', '')
+
+    return re.fullmatch(pattern, processed_string) is not None
