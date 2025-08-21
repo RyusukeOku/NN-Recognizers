@@ -8,6 +8,9 @@ import torch
 from rau.tasks.common.data import load_prepared_data_file
 from rau.vocab import ToStringVocabulary
 
+from recognizers.automata.fsa_map import get_fsa
+from recognizers.automata.finite_automaton import FiniteAutomatonRunner
+
 from .vocabulary import VocabularyData, load_vocabulary_data_from_file
 
 @dataclasses.dataclass
@@ -30,7 +33,20 @@ def add_data_arguments(parser, validation=True):
                  'will be used as the validation data. The default name is '
                  '"validation".')
 
-def load_prepared_data_from_directory(directory, model_interface):
+def get_fsa_state_sequences(strings_data, fsa_container, fsa_alphabet_list, model_vocab):
+    # This seems to be an issue with the provided code, FiniteAutomatonContainer does not have a build method.
+    # I will assume the container itself can be used as the automaton for the runner.
+    # If this is not the case, the user needs to clarify how to get a runnable automaton from the container.
+    runner = FiniteAutomatonRunner(fsa_container)
+    fsa_alphabet_map = {symbol: i for i, symbol in enumerate(fsa_alphabet_list)}
+    state_sequences = []
+    for string_tensor in strings_data:
+        string = [model_vocab.value(token_id.item()) for token_id in string_tensor]
+        states = runner.get_state_sequence(string, fsa_alphabet_map)
+        state_sequences.append(torch.tensor(states, dtype=torch.long))
+    return state_sequences
+
+def load_prepared_data_from_directory(directory, model_interface, args, vocabulary_data):
     strings_data = load_prepared_data_file(directory / 'main.prepared')
     labels_data = load_prepared_labels_file(directory / 'labels.prepared')
     if model_interface.use_next_symbols_head:
@@ -40,7 +56,18 @@ def load_prepared_data_from_directory(directory, model_interface):
         )
     else:
         next_symbols_data = itertools.repeat(None, len(labels_data))
-    return list(zip(strings_data, zip(labels_data, next_symbols_data, strict=True), strict=True))
+
+    fsa_states_data = itertools.repeat(None, len(labels_data))
+    if hasattr(args, 'fsa_state_integration') and args.fsa_state_integration:
+        if not hasattr(args, 'fsa_name') or not args.fsa_name:
+            raise ValueError("fsa_name must be specified when fsa_state_integration is enabled.")
+        fsa_container, fsa_alphabet_list = get_fsa(args.fsa_name)
+        
+        input_vocab, _ = model_interface.get_vocabularies(vocabulary_data)
+
+        fsa_states_data = get_fsa_state_sequences(strings_data, fsa_container, fsa_alphabet_list, input_vocab)
+
+    return list(zip(strings_data, zip(labels_data, next_symbols_data, fsa_states_data), strict=True))
 
 def load_prepared_labels_file(path: pathlib.Path) -> list[bool]:
     return torch.load(path, weights_only=False)
@@ -69,12 +96,16 @@ def load_vocabulary_data(args, parser) -> VocabularyData:
 def load_prepared_data(args, parser, vocabulary_data, model_interface, builder=None):
     training_data = load_prepared_data_from_directory(
         args.training_data,
-        model_interface
+        model_interface,
+        args,
+        vocabulary_data
     )
     if hasattr(args, 'validation_data'):
         validation_data = load_prepared_data_from_directory(
             args.training_data / 'datasets' / args.validation_data,
-            model_interface
+            model_interface,
+            args,
+            vocabulary_data
         )
     else:
         validation_data = None

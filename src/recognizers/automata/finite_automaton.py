@@ -115,3 +115,40 @@ class WeightedFiniteAutomatonContainer(WeightedFiniteAutomaton[Weight], Weighted
 
     def set_accept_weight(self, state: State, weight: Weight) -> None:
         self._accept_weights[state] = weight
+
+class FiniteAutomatonRunner:
+    """A class to run a FiniteAutomaton on input sequences."""
+
+    def __init__(self, automaton: FiniteAutomaton):
+        self.automaton = automaton
+        self._transitions = {}
+        for transition in self.automaton.transitions():
+            key = (transition.state_from, transition.symbol)
+            self._transitions[key] = transition.state_to
+
+    def get_state_sequence(self, input_symbols: list[str], alphabet: dict[str, int]) -> list[int]:
+        """ 
+        Processes an input string and returns the sequence of states.
+        The initial state is included as the first element.
+        """
+        current_state = self.automaton.initial_state()
+        # The first state, before consuming any symbols, is the initial state.
+        states = [current_state]
+
+        for symbol_str in input_symbols:
+            if symbol_str not in alphabet:
+                # If the symbol is not in the FSA's alphabet, it's a failure.
+                # We can handle this by transitioning to a non-accepting sink state
+                # if one exists, or simply staying put. For this use case,
+                # we assume the input vocabulary is aligned with the FSA's alphabet.
+                # We will stay in the current state if symbol is unknown.
+                pass
+            else:
+                symbol = alphabet[symbol_str]
+                current_state = self._transitions.get(
+                    (current_state, symbol), 
+                    current_state # Default to staying in the same state if transition not defined
+                )
+            states.append(current_state)
+        
+        return states

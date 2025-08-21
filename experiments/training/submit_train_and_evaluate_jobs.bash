@@ -31,7 +31,8 @@ for language in "${LANGUAGES[@]}"; do
             "$validation_data" \
             "$trial_no" \
             $DEVICE_FLAG \
-            --no-progress # --no-progress は元のスクリプトのオプション
+            --no-progress \
+            --fsa_state_integration
             
           echo "Finished job: $JOB_NAME"
           echo "------------------------------------"

@@ -17,6 +17,24 @@ def main():
         default=0,
         help='(Optional) If greater than 0, add an n-gram head of size n to the model.'
     )
+    parser.add_argument(
+        '--fsa_state_integration',
+        action='store_true',
+        help='(Optional) If set, integrate FSA state embeddings into the model.'
+    )
+    parser.add_argument(
+        '--fsa_name',
+        choices=[
+            'parity', 'even_pairs', 'repeat_01', 'cycle_navigation',
+            'modular_arithmetic', 'dyck_2_3', 'first',
+            'majority_structural', 'reversal_structural', 'stack_manipulation_structural',
+            'marked_reversal_structural', 'marked_copy_structural',
+            'missing_duplicate_structural', 'odds_first_structural',
+            'compute_sqrt_structural', 'binary_addition_structural',
+            'binary_multiplication_structural', 'bucket_sort_structural'
+        ],
+        help='(Optional) Name of the FSA to use for state integration.'
+    )
 
     args, other_args = parser.parse_known_args()
 
@@ -91,6 +109,8 @@ def main():
     print(' '.join(outputs))
     if args.add_ngram_head_n > 0:
         print(f'--add-ngram-head-n {args.add_ngram_head_n}')
+    if args.fsa_state_integration:
+        print(f'--fsa_state_integration --fsa_name {args.fsa_name}')
     print(' '.join(other_args))
 
 if __name__ == '__main__':
