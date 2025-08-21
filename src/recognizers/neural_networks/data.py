@@ -59,9 +59,10 @@ def load_prepared_data_from_directory(directory, model_interface, args, vocabula
 
     fsa_states_data = itertools.repeat(None, len(labels_data))
     if hasattr(args, 'fsa_state_integration') and args.fsa_state_integration:
-        if not hasattr(args, 'fsa_name') or not args.fsa_name:
-            raise ValueError("fsa_name must be specified when fsa_state_integration is enabled.")
-        fsa_container, fsa_alphabet_list = get_fsa(args.fsa_name)
+        if not hasattr(args, 'language') or not args.language:
+            raise ValueError("language must be specified when fsa_state_integration is enabled.")
+        fsa_name = get_fsa_name_for_language(args.language)
+        fsa_container, fsa_alphabet_list = get_fsa(fsa_name)
         
         input_vocab, _ = model_interface.get_vocabularies(vocabulary_data)
 
