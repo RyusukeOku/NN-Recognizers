@@ -238,7 +238,7 @@ class RecognitionModelInterface(ModelInterface):
                     use_padding=False, shared_embeddings=shared_embeddings
                 )
             if fsa_state_integration:
-                input_layer = FSAIntegratedInputLayer(input_layer, fsa_num_states, d_model)
+                input_layer = Composable(FSAIntegratedInputLayer(input_layer, fsa_num_states, d_model))
             core_pipeline = (
                 input_layer @
                 UnidirectionalTransformerEncoderLayers(
@@ -260,7 +260,7 @@ class RecognitionModelInterface(ModelInterface):
                 use_padding=False, shared_embeddings=shared_embeddings
             )
             if fsa_state_integration:
-                embedding_layer = FSAIntegratedInputLayer(embedding_layer, fsa_num_states, hidden_units)
+                embedding_layer = Composable(FSAIntegratedInputLayer(embedding_layer, fsa_num_states, hidden_units))
             core = RecurrentModel(input_size=hidden_units, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
             core_pipeline = (
                 embedding_layer @
