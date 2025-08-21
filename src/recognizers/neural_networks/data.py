@@ -8,7 +8,7 @@ import torch
 from rau.tasks.common.data import load_prepared_data_file
 from rau.vocab import ToStringVocabulary
 
-from recognizers.automata.fsa_map import get_fsa
+from recognizers.automata.fsa_map import get_fsa, get_fsa_name_for_language
 from recognizers.automata.finite_automaton import FiniteAutomatonRunner
 
 from .vocabulary import VocabularyData, load_vocabulary_data_from_file
@@ -41,7 +41,7 @@ def get_fsa_state_sequences(strings_data, fsa_container, fsa_alphabet_list, mode
     fsa_alphabet_map = {symbol: i for i, symbol in enumerate(fsa_alphabet_list)}
     state_sequences = []
     for string_tensor in strings_data:
-        string = [model_vocab.value(token_id.item()) for token_id in string_tensor]
+        string = [model_vocab[token_id.item()] for token_id in string_tensor]
         states = runner.get_state_sequence(string, fsa_alphabet_map)
         state_sequences.append(torch.tensor(states, dtype=torch.long))
     return state_sequences
