@@ -34,15 +34,14 @@ def add_data_arguments(parser, validation=True):
                  '"validation".')
 
 def get_fsa_state_sequences(strings_data, fsa_container, fsa_alphabet_list, model_vocab):
-    # This seems to be an issue with the provided code, FiniteAutomatonContainer does not have a build method.
-    # I will assume the container itself can be used as the automaton for the runner.
-    # If this is not the case, the user needs to clarify how to get a runnable automaton from the container.
     runner = FiniteAutomatonRunner(fsa_container)
     fsa_alphabet_map = {symbol: i for i, symbol in enumerate(fsa_alphabet_list)}
     state_sequences = []
     for string_tensor in strings_data:
-        string = [model_vocab[token_id.item()] for token_id in string_tensor]
-        states = runner.get_state_sequence(string, fsa_alphabet_map)
+        token_ids = [token_id.item() for token_id in string_tensor]
+        full_string = model_vocab.to_string(token_ids)
+        string_symbols = full_string.split(' ') if full_string else []
+        states = runner.get_state_sequence(string_symbols, fsa_alphabet_map)
         state_sequences.append(torch.tensor(states, dtype=torch.long))
     return state_sequences
 
