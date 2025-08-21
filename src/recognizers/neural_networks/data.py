@@ -36,10 +36,9 @@ def add_data_arguments(parser, validation=True):
 def get_fsa_state_sequences(strings_data, fsa_container, fsa_alphabet_list, model_vocab):
     runner = FiniteAutomatonRunner(fsa_container)
     fsa_alphabet_map = {symbol: i for i, symbol in enumerate(fsa_alphabet_list)}
-    vocab_items = model_vocab.items()
     state_sequences = []
     for string_tensor in strings_data:
-        string_symbols = [vocab_items[token_id.item()] for token_id in string_tensor]
+        string_symbols = [model_vocab.to_string(token_id.item()) for token_id in string_tensor]
         states = runner.get_state_sequence(string_symbols, fsa_alphabet_map)
         state_sequences.append(torch.tensor(states, dtype=torch.long))
     return state_sequences
