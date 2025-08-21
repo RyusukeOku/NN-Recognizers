@@ -5,35 +5,7 @@ from rayuela.base.symbol import Sym
 from rayuela.fsa.fsa import FSA
 
 from recognizers.automata.finite_automaton import FiniteAutomatonContainer
-from recognizers.hand_picked_languages.rayuela_util import from_rayuela_fsa, Alphabet
-
-def create_fsa_from_regex_like(alphabet: list[str], structure: list[tuple[int, list[str], int]]):
-    """
-    Creates an FSA from a simplified structure definition.
-    This is not a full regex engine, but handles simple cases for this project.
-    """
-    fsa = FSA(R=Boolean)
-    states = {}
-
-    def get_state(i):
-        if i not in states:
-            states[i] = State(i)
-            if i == 0:
-                fsa.set_I(states[i], Boolean.one)
-        return states[i]
-
-    for from_state_idx, symbols, to_state_idx in structure:
-        from_state = get_state(from_state_idx)
-        to_state = get_state(to_state_idx)
-        for symbol in symbols:
-            fsa.add_arc(from_state, Sym(symbol), to_state, Boolean.one)
-
-    # For now, assume the last state mentioned is the accepting one.
-    # This is a simplification that works for the required structures.
-    if states:
-        fsa.set_F(list(states.values())[-1], Boolean.one)
-
-    return from_rayuela_fsa(fsa, alphabet)
+from recognizers.hand_picked_languages.rayuela_util import from_rayuela_fsa
 
 def majority_structural_dfa() -> tuple[FiniteAutomatonContainer, list[str]]:
     """ Matches [01]^* """
