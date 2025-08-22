@@ -10,7 +10,7 @@ import torch
 from rau.tasks.common.training_loop import MicroAveragedScoreAccumulator
 
 from recognizers.tools.jsonl import write_json_line
-from recognizers.neural_networks.data import load_prepared_data_from_directory
+from recognizers.neural_networks.data import load_prepared_data_from_directory, load_vocabulary_data
 from recognizers.neural_networks.model_interface import RecognitionModelInterface
 from recognizers.neural_networks.training_loop import generate_batches, get_loss_terms
 
@@ -105,7 +105,8 @@ def main():
     model_interface.add_forward_arguments(parser)
     args = parser.parse_args()
 
-    saver = model_interface.construct_saver(args)
+    vocabulary_data = load_vocabulary_data(args, parser)
+    saver = model_interface.construct_saver(args, vocabulary_data)
     for dataset in args.datasets:
         if dataset == 'training':
             input_directory = args.training_data
@@ -113,7 +114,9 @@ def main():
             input_directory = args.training_data / 'datasets' / dataset
         examples = load_prepared_data_from_directory(
             input_directory,
-            model_interface
+            model_interface,
+            args,
+            vocabulary_data
         )
         examples = [(x, (i, d)) for i, (x, d) in enumerate(examples)]
         batches = generate_batches(examples, args.batching_max_tokens)
