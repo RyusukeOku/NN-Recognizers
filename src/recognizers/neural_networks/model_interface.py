@@ -34,6 +34,7 @@ class FSAIntegratedInputLayer(nn.Module):
         super().__init__()
         self.original_input_layer = original_input_layer
         self.fsa_embedding = nn.Embedding(fsa_num_states, embedding_dim)
+        self.projection = nn.Linear(embedding_dim * 2, embedding_dim)
 
     def forward(self, x, fsa_state_sequence=None, **kwargs):
         word_and_pos_embedding = self.original_input_layer(x, **kwargs)
@@ -44,7 +45,7 @@ class FSAIntegratedInputLayer(nn.Module):
                 fsa_embeds = nn.functional.pad(fsa_embeds, (0, 0, padding_size, 0))
             elif fsa_embeds.shape[1] > word_and_pos_embedding.shape[1]:
                 fsa_embeds = fsa_embeds[:, :word_and_pos_embedding.shape[1], :]
-            return word_and_pos_embedding + fsa_embeds
+            return self.projection(torch.cat((word_and_pos_embedding, fsa_embeds), dim=-1))
         return word_and_pos_embedding
 
 @dataclasses.dataclass
@@ -238,13 +239,15 @@ class RecognitionModelInterface(ModelInterface):
                     use_padding=False, shared_embeddings=shared_embeddings
                 )
             if fsa_state_integration:
-                input_layer = Composable(FSAIntegratedInputLayer(input_layer, fsa_num_states, d_model))
+                input_layer = Composable(FSAIntegratedInputLayer(input_layer, fsa_num_states, d_model)).tag('input')
+            else:
+                input_layer = input_layer.tag('input')
+            encoder = UnidirectionalTransformerEncoderLayers(
+                num_layers=num_layers, d_model=d_model, num_heads=num_heads,
+                feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
+            ).main().tag('encoder')
             core_pipeline = (
-                input_layer @
-                UnidirectionalTransformerEncoderLayers(
-                    num_layers=num_layers, d_model=d_model, num_heads=num_heads,
-                    feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
-                ).main()
+                input_layer @ encoder
             )
             output_size = d_model
         elif architecture in ('rnn', 'lstm'):
@@ -260,12 +263,14 @@ class RecognitionModelInterface(ModelInterface):
                 use_padding=False, shared_embeddings=shared_embeddings
             )
             if fsa_state_integration:
-                embedding_layer = Composable(FSAIntegratedInputLayer(embedding_layer, fsa_num_states, hidden_units))
+                embedding_layer = Composable(FSAIntegratedInputLayer(embedding_layer, fsa_num_states, hidden_units)).tag('input')
+            else:
+                embedding_layer = embedding_layer.tag('input')
             core = RecurrentModel(input_size=hidden_units, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
             core_pipeline = (
                 embedding_layer @
                 DropoutUnidirectional(dropout) @
-                core.main() @
+                core.main().tag('encoder') @
                 DropoutUnidirectional(dropout)
             )
             output_size = hidden_units
@@ -403,19 +408,26 @@ class RecognitionModelInterface(ModelInterface):
                 positive_mask=model_input.positive_mask
             )
 
-        core_kwargs = {'include_first': not self.uses_bos}
+        input_kwargs = {}
         if self.fsa_state_integration:
-            core_kwargs['fsa_state_sequence'] = model_input.fsa_state_sequence
+            input_kwargs['fsa_state_sequence'] = model_input.fsa_state_sequence
+
+        encoder_kwargs = {'include_first': not self.uses_bos}
+
+        core_tag_kwargs = {
+            'input': input_kwargs,
+            'encoder': encoder_kwargs
+        }
 
         core_internal_tag_kwargs = {}
         if self.add_ngram_head_n > 0:
             core_internal_tag_kwargs['ngram_head'] = {'input_ids': model_input.input_ids}
         
         if core_internal_tag_kwargs:
-            core_kwargs['tag_kwargs'] = core_internal_tag_kwargs
+            core_tag_kwargs['tag_kwargs'] = core_internal_tag_kwargs
             
         tag_kwargs = dict(
-            core=core_kwargs,
+            core=dict(tag_kwargs=core_tag_kwargs),
             output_heads=dict(
                 last_index=model_input.last_index,
                 positive_mask=model_input.positive_mask
