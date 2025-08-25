@@ -140,6 +140,14 @@ class RecognitionModelInterface(ModelInterface):
             use_bos=uses_bos,
             use_eos=uses_output_vocab
         )
+        
+        actual_bos_index = None
+        if uses_bos:
+            try:
+                actual_bos_index = input_vocab.to_int('bos')
+            except ValueError:
+                raise ValueError("BOS token 'bos' not found in vocabulary even though use_bos is True.")
+
         reset_symbol_ids = None
         if args.positional_encoding == 'resettable':
             reset_symbol_ids = {input_vocab.to_int(s) for s in args.reset_symbols if s in input_vocab}
@@ -167,7 +175,7 @@ class RecognitionModelInterface(ModelInterface):
             use_next_symbols_head=args.use_next_symbols_head,
             input_vocabulary_size=len(input_vocab),
             output_vocabulary_size=len(output_vocab) if uses_output_vocab else None,
-            bos_index=input_vocab.bos_index if uses_bos else None,
+            bos_index=actual_bos_index,
             eos_index=output_vocab.eos_index if uses_output_vocab else None,
             positional_encoding=args.positional_encoding,
             reset_symbol_ids=reset_symbol_ids,
