@@ -4,31 +4,33 @@ set -euo pipefail
 
 usage() {
   echo "Usage: $0 <base-directory> <language> <architecture> <loss-terms> \\
-  <validation-data> <trial-no> [--no-progress]
+  <validation-data> <trial-no> [--no-progress] [--fsa_state_integration]"
 
-Train and evaluate a neural network on a language.
+  echo "Train and evaluate a neural network on a language."
 
-  <base-directory>
-    Directory under which all datasets and models are stored.
-  <language>
-    Name of the language to run on. Corresponds to the name of a directory
-    under <base-directory>/languages/.
-  <architecture>
-    One of transformer, rnn, lstm.
-  <loss-terms>
-    Any of the following, joined by \`+\` characters:
-    - rec: recognition (binary classification with binary cross-entropy loss)
-    - lm: language modeling (cross-entropy loss of next symbol)
-    - ns: next set prediction (binary cross-entropy loss of whether every
-          symbol at every position is valid in the next position)
-    Example: rec+lm for recognition and language modeling.
-  <validation-data>
-    Which validation set to use. One of: validation-short, validation-long.
-  <trial-no>
-    A number distinguishing this random restart.
-  --no-progress
-    Don't show progress messages.
-"
+  echo "  <base-directory>"
+  echo "    Directory under which all datasets and models are stored."
+  echo "  <language>"
+  echo "    Name of the language to run on. Corresponds to the name of a directory"
+  echo "    under <base-directory>/languages/."
+  echo "  <architecture>"
+  echo "    One of transformer, rnn, lstm."
+  echo "  <loss-terms>"
+  echo "    Any of the following, joined by 
++ characters:"
+  echo "    - rec: recognition (binary classification with binary cross-entropy loss)"
+  echo "    - lm: language modeling (cross-entropy loss of next symbol)"
+  echo "    - ns: next set prediction (binary cross-entropy loss of whether every"
+  echo "          symbol at every position is valid in the next position)"
+  echo "    Example: rec+lm for recognition and language modeling."
+  echo "  <validation-data>"
+  echo "    Which validation set to use. One of: validation-short, validation-long."
+  echo "  <trial-no>"
+  echo "    A number distinguishing this random restart."
+  echo "  --no-progress"
+  echo "    Don't show progress messages."
+  echo "  --fsa_state_integration"
+  echo "    Use FSA state integration."
 }
 
 random_sample() {
@@ -45,7 +47,19 @@ if ! shift 6; then
   usage >&2
   exit 1
 fi
-progress_args=("$@")
+
+fsa_flags=()
+progress_args=()
+for arg in "$@"; do
+  case "$arg" in
+    --fsa_state_integration)
+      fsa_flags+=(--fsa_state_integration)
+      ;;
+    *)
+      progress_args+=("$arg")
+      ;;
+  esac
+done
 
 language_dir=$(get_language_dir "$base_dir" "$language")
 
@@ -59,23 +73,23 @@ model_flags=($( \
 loss_term_flags=()
 for loss_term in ${loss_terms//+/ }; do
   case $loss_term in
-    rec) ;;
-    lm)
+    rec) ;; \
+    lm) 
       loss_term_flags+=( \
         --use-language-modeling-head \
         --language-modeling-loss-coefficient "$(random_sample --log 0.01 10)" \
       )
-      ;;
-    ns)
+      ;; \
+    ns) 
       loss_term_flags+=( \
         --use-next-symbols-head \
         --next-symbols-loss-coefficient "$(random_sample --log 0.01 10)" \
       )
-      ;;
+      ;; \
     *)
       echo "invalid loss term $loss_term" >&2
       exit 1
-      ;;
+      ;; 
   esac
 done
 
@@ -86,6 +100,7 @@ python src/recognizers/neural_networks/train.py \
   --validation-data "$validation_data" \
   --language "$language" \
   --architecture "$architecture" \
+  "${fsa_flags[@]}" \
   "${model_flags[@]}" \
   --init-scale 0.1 \
   "${loss_term_flags[@]}" \
@@ -99,4 +114,4 @@ python src/recognizers/neural_networks/train.py \
   --learning-rate-decay-factor 0.5 \
   --examples-per-checkpoint 10000 \
   "${progress_args[@]}"
-bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir"
+bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir" "${fsa_flags[@]}"
