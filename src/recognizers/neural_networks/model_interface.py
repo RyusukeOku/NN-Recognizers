@@ -436,7 +436,15 @@ class RecognitionModelInterface(ModelInterface):
                 positive_mask=model_input.positive_mask
             )
         )
-        return model(model_input.input_sequence, tag_kwargs=tag_kwargs)
+
+        # For transformers, UnidirectionalTransformerEncoderLayers requires
+        # include_first=False. The logic `not self.uses_bos` correctly sets this,
+        # but the argument can get lost in the composition framework. We pass it
+        # explicitly to the model call to ensure it is propagated correctly.
+        if self.architecture == 'transformer':
+            return model(model_input.input_sequence, include_first=False, tag_kwargs=tag_kwargs)
+        else:
+            return model(model_input.input_sequence, tag_kwargs=tag_kwargs)
 
 
 class OutputHeads(torch.nn.Module):
