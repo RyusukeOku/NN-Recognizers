@@ -27,6 +27,8 @@ from .vocabulary import get_vocabularies
 from .resettable_positional_encoding import ResettablePositionalInputLayer
 from .ngram_head import NgramHead
 from .lba import NeuralLBA
+from .FSA_integrated_input_layer import FSAIntegratedInputLayer
+import recognizers.automata.structural_fsas as structural_fsas
 
 @dataclasses.dataclass
 class ModelInput:
@@ -120,6 +122,12 @@ class RecognitionModelInterface(ModelInterface):
         group.add_argument('--embedding-size', type=int, help='(hybrid_csg) Embedding size.')
         group.add_argument('--lba-hidden-size', type=int, default=40, help='(hybrid_csg) Hidden size for NeuralLBA.')
         group.add_argument('--lba-n-steps', type=int, default=100, help='(hybrid_csg) Number of steps for NeuralLBA.')
+        group.add_argument('--use-fsa-features', action='store_true', default=False,
+            help='(transformer only) Use FSA state features in the input layer.')
+        group.add_argument('--fsa-name', type=str,
+            help='(transformer with --use-fsa-features) Name of the structural FSA to use.')
+        group.add_argument('--fsa-embedding-dim', type=int,
+            help='(transformer with --use-fsa-features) Dimension of the FSA state embeddings.')
 
 
     def get_kwargs(self, args, vocabulary_data):
@@ -134,7 +142,7 @@ class RecognitionModelInterface(ModelInterface):
         if args.positional_encoding == 'resettable':
             reset_symbol_ids = {input_vocab.to_int(s) for s in args.reset_symbols if s in input_vocab}
         
-        return dict(
+        kwargs = dict(
             architecture=args.architecture,
             add_ngram_head_n=getattr(args, 'add_ngram_head_n', 0),
             hybrid_base_architecture=getattr(args, 'hybrid_base_architecture', None),
@@ -156,6 +164,28 @@ class RecognitionModelInterface(ModelInterface):
             lba_hidden_size=getattr(args, 'lba_hidden_size', 40),
             lba_n_steps=getattr(args, 'lba_n_steps', 50)
         )
+
+        kwargs['use_fsa_features'] = args.use_fsa_features
+        if args.use_fsa_features:
+            if args.architecture != 'transformer':
+                raise ValueError('--use-fsa-features is only supported for --architecture=transformer')
+            if args.fsa_name is None:
+                raise ValueError('--fsa-name is required when using --use-fsa-features')
+            if args.fsa_embedding_dim is None:
+                raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
+
+            fsa_func_name = f'{args.fsa_name}_structural_fsa_container'
+            if not hasattr(structural_fsas, fsa_func_name):
+                raise ValueError(f"Unknown FSA name: {args.fsa_name}")
+            
+            fsa_func = getattr(structural_fsas, fsa_func_name)
+            fsa_container = fsa_func()
+
+            kwargs['fsa_container'] = fsa_container
+            kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
+            kwargs['word_vocab'] = input_vocab
+
+        return kwargs
 
     def construct_model(self, architecture, **kwargs):
         if architecture is None:
@@ -199,7 +229,7 @@ class RecognitionModelInterface(ModelInterface):
             device=self.get_device(None)
         )
 
-    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, **kwargs):
+    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa_container=None, fsa_embedding_dim=None, word_vocab=None, **kwargs):
         core_pipeline = None
         output_size = 0
         shared_embeddings = None
@@ -212,19 +242,31 @@ class RecognitionModelInterface(ModelInterface):
                 tie_embeddings=use_language_modeling_head, input_vocabulary_size=input_vocabulary_size,
                 output_vocabulary_size=output_vocabulary_size, embedding_size=d_model, use_padding=False
             )
-            if positional_encoding == 'resettable':
-                input_layer = ResettablePositionalInputLayer(
-                    vocabulary_size=input_vocabulary_size, d_model=d_model, reset_symbols=reset_symbol_ids,
-                    dropout=dropout, use_padding=False, shared_embeddings=shared_embeddings
+            if use_fsa_features:
+                input_layer = FSAIntegratedInputLayer(
+                    word_vocab=word_vocab,
+                    word_embedding_dim=d_model,
+                    fsa_embedding_dim=fsa_embedding_dim,
+                    fsa_container=fsa_container,
+                    use_padding=False,
+                    dropout=dropout
                 )
+                projection = Layer(d_model + fsa_embedding_dim, d_model)
+                full_input_layer = input_layer @ projection
             else:
-                input_layer = get_transformer_input_unidirectional(
-                    vocabulary_size=input_vocabulary_size, d_model=d_model, dropout=dropout,
-                    use_padding=False, shared_embeddings=shared_embeddings
-                )
+                if positional_encoding == 'resettable':
+                    full_input_layer = ResettablePositionalInputLayer(
+                        vocabulary_size=input_vocabulary_size, d_model=d_model, reset_symbols=reset_symbol_ids,
+                        dropout=dropout, use_padding=False, shared_embeddings=shared_embeddings
+                    )
+                else:
+                    full_input_layer = get_transformer_input_unidirectional(
+                        vocabulary_size=input_vocabulary_size, d_model=d_model, dropout=dropout,
+                        use_padding=False, shared_embeddings=shared_embeddings
+                    )
             
             core_pipeline = (
-                input_layer @
+                full_input_layer @
                 UnidirectionalTransformerEncoderLayers(
                     num_layers=num_layers, d_model=d_model, num_heads=num_heads,
                     feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True

@@ -49,7 +49,8 @@ def main():
         d_model_float = (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
         size_float = d_model_float / num_heads
         size = round(size_float)
-        d_model = size * num_heads
+        # d_model = size * num_heads
+        d_model = 24
         feedforward_size = d_model * feedforward_size_factor
         outputs.extend([
             '--d-model', str(d_model),
