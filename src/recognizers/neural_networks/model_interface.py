@@ -91,10 +91,9 @@ class HybridCSGModel(nn.Module):
 
 class ForceIncludeFirstFalse(Unidirectional):
     def __init__(self, module: Unidirectional):
-        super().__init__()
+        super().__init__(main=True)
         self.module = module
-        self._composable_is_main = module._composable_is_main
-        self._composable_tags = module._composable_tags
+        self._composable_tags = getattr(module, '_composable_tags', {})
 
     def forward(self, input_sequence: torch.Tensor, *args, **kwargs):
         kwargs['include_first'] = False
