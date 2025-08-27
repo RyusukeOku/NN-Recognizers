@@ -203,7 +203,7 @@ class RecognitionModelInterface(ModelInterface):
 
     def construct_saver(self, args, vocabulary_data=None):
         kwargs = self.get_kwargs(args, vocabulary_data)
-        output = self.get_output_directory(args)
+        output = args.output
         saver = construct_saver(self.construct_model, output, **kwargs)
 
         if 'fsa' in saver.kwargs:
