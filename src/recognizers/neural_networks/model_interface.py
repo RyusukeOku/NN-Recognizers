@@ -20,7 +20,8 @@ from rau.models.transformer.unidirectional_encoder import UnidirectionalTransfor
 from rau.unidirectional import (
     EmbeddingUnidirectional,
     DropoutUnidirectional,
-    OutputUnidirectional
+    OutputUnidirectional,
+    Unidirectional
 )
 
 from .vocabulary import get_vocabularies
@@ -87,6 +88,17 @@ class HybridCSGModel(nn.Module):
         logits = self.classifier(combined_output).squeeze(-1)
 
         return logits, None, None
+
+class ForceIncludeFirstFalse(Unidirectional):
+    def __init__(self, module: Unidirectional):
+        super().__init__()
+        self.module = module
+        self._composable_is_main = module._composable_is_main
+        self._composable_tags = module._composable_tags
+
+    def forward(self, input_sequence: torch.Tensor, *args, **kwargs):
+        kwargs['include_first'] = False
+        return self.module(input_sequence, *args, **kwargs)
 
 class RecognitionModelInterface(ModelInterface):
 
@@ -265,12 +277,15 @@ class RecognitionModelInterface(ModelInterface):
                         use_padding=False, shared_embeddings=shared_embeddings
                     )
             
+            encoder = UnidirectionalTransformerEncoderLayers(
+                num_layers=num_layers, d_model=d_model, num_heads=num_heads,
+                feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
+            ).main()
+            wrapped_encoder = ForceIncludeFirstFalse(encoder)
+
             core_pipeline = (
                 full_input_layer @
-                UnidirectionalTransformerEncoderLayers(
-                    num_layers=num_layers, d_model=d_model, num_heads=num_heads,
-                    feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
-                ).main()
+                wrapped_encoder
             )
             output_size = d_model
 
