@@ -4,7 +4,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from recognizers.automata.finite_automaton import FiniteAutomatonContainer
+from rayuela.fsa.fsa import FSA
 from rau.models.transformer.input_layer import (
     ScaledEmbeddingLayer,
     SinusoidalPositionalEncodingLayer,
@@ -49,7 +49,7 @@ class FSAIntegratedInputLayer(nn.Module):
         word_vocab: Any,
         word_embedding_dim: int,
         fsa_embedding_dim: int,
-        fsa_container: FiniteAutomatonContainer,
+        fsa: FSA,
         use_padding: bool,
         dropout: float | None = None,
     ):
@@ -59,30 +59,46 @@ class FSAIntegratedInputLayer(nn.Module):
                         `__len__` and `to_string(int)` methods.
             word_embedding_dim: The dimension of word embeddings.
             fsa_embedding_dim: The dimension of FSA state embeddings.
-            fsa_container: A container for the FSA, expected to have:
-                - `num_states` (int): The total number of states.
-                - `start_state` (int): The ID of the start state.
-                - `transitions` (torch.Tensor): A tensor of shape
-                  (num_states, fsa_vocab_size) representing the transition function.
-                - `alphabet` (Dict[str, int]): A mapping from symbols to FSA vocab IDs.
+            fsa: A rayuela.fsa.fsa.FSA object.
             use_padding: Whether to use padding for word embeddings.
             dropout: Dropout rate.
         """
         super().__init__()
 
-        # Basic validation of the fsa_container object
-        for attr in ["num_states", "start_state", "transitions", "alphabet"]:
-            if not hasattr(fsa_container, attr):
-                raise ValueError(f"The FSA container object must have a '{attr}' attribute.")
-        if not isinstance(fsa_container.transitions, torch.Tensor):
-            raise ValueError("The FSA container's 'transitions' attribute must be a torch.Tensor.")
-        if not isinstance(fsa_container.alphabet, dict):
-            raise ValueError("The FSA container's 'alphabet' attribute must be a dict.")
-
-        self.fsa = fsa_container
         self.word_vocab = word_vocab
         vocabulary_size = len(self.word_vocab)
 
+        # 1. Extract FSA information and build mappings
+        states = fsa.ordered_states
+        state_to_id = {state: i for i, state in enumerate(states)}
+        num_states = len(states)
+
+        start_state_obj, _ = next(fsa.I)
+        self.start_state_id = state_to_id[start_state_obj]
+
+        fsa_alphabet = {str(sym): sym for sym in fsa.Sigma}
+
+        # 2. Build the expanded transition matrix for the main vocabulary
+        # Default transition is a self-loop for symbols not in the FSA's alphabet.
+        expanded_transitions = torch.arange(
+            num_states, dtype=torch.long
+        ).unsqueeze(1).expand(num_states, vocabulary_size)
+
+        for word_idx in range(vocabulary_size):
+            symbol_str = self.word_vocab.to_string(word_idx)
+            if symbol_str in fsa_alphabet:
+                fsa_sym = fsa_alphabet[symbol_str]
+                for p_state in states:
+                    p_id = state_to_id[p_state]
+                    # Assuming deterministic FSA, take the first (and only) transition
+                    if fsa_sym in fsa.δ[p_state]:
+                        q_state = next(iter(fsa.δ[p_state][fsa_sym]))
+                        q_id = state_to_id[q_state]
+                        expanded_transitions[p_id, word_idx] = q_id
+        
+        self.register_buffer("fsa_transitions", expanded_transitions)
+
+        # 3. Initialize layers
         self.word_embedding = ScaledEmbeddingLayer(
             vocabulary_size=vocabulary_size,
             output_size=word_embedding_dim,
@@ -92,32 +108,11 @@ class FSAIntegratedInputLayer(nn.Module):
         self.positional_encoding = SinusoidalPositionalEncodingLayer()
 
         self.fsa_state_embedding = FSAStateEmbedding(
-            num_states=self.fsa.num_states,
+            num_states=num_states,
             embedding_dim=fsa_embedding_dim,
         )
 
         self.dropout = nn.Dropout(p=dropout) if dropout is not None else None
-
-        # --- Build the expanded transition matrix ---
-        # This matrix maps states and main vocabulary IDs to next states.
-
-        # Default transition is a self-loop.
-        expanded_transitions = torch.arange(
-            self.fsa.num_states, dtype=torch.long
-        ).unsqueeze(1).expand(self.fsa.num_states, vocabulary_size)
-
-        fsa_alphabet = self.fsa.alphabet
-        fsa_internal_transitions = self.fsa.transitions.long()
-
-        for word_idx in range(vocabulary_size):
-            symbol_str = self.word_vocab.to_string(word_idx)
-            if symbol_str in fsa_alphabet:
-                fsa_symbol_idx = fsa_alphabet[symbol_str]
-                # Copy the transitions for this symbol from the original FSA matrix.
-                expanded_transitions[:, word_idx] = fsa_internal_transitions[:, fsa_symbol_idx]
-
-        self.register_buffer("fsa_transitions", expanded_transitions)
-
 
     def forward(self, word_id_sequence: torch.Tensor) -> torch.Tensor:
         """
@@ -138,7 +133,7 @@ class FSAIntegratedInputLayer(nn.Module):
 
         # 2. Compute FSA state sequence
         current_states = torch.full(
-            (batch_size,), self.fsa.start_state, dtype=torch.long, device=device
+            (batch_size,), self.start_state_id, dtype=torch.long, device=device
         )
         fsa_state_ids = torch.empty(
             batch_size, sequence_length, dtype=torch.long, device=device

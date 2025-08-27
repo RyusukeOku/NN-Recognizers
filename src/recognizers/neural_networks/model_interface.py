@@ -174,14 +174,14 @@ class RecognitionModelInterface(ModelInterface):
             if args.fsa_embedding_dim is None:
                 raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
 
-            fsa_func_name = f'{args.fsa_name}_structural_fsa_container'
+            fsa_func_name = f'{args.fsa_name}_structural_fsa'
             if not hasattr(structural_fsas, fsa_func_name):
                 raise ValueError(f"Unknown FSA name: {args.fsa_name}")
             
             fsa_func = getattr(structural_fsas, fsa_func_name)
-            fsa_container = fsa_func()
+            fsa = fsa_func()
 
-            kwargs['fsa_container'] = fsa_container
+            kwargs['fsa'] = fsa
             kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
             kwargs['word_vocab'] = input_vocab
 
@@ -229,7 +229,7 @@ class RecognitionModelInterface(ModelInterface):
             device=self.get_device(None)
         )
 
-    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa_container=None, fsa_embedding_dim=None, word_vocab=None, **kwargs):
+    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa=None, fsa_embedding_dim=None, word_vocab=None, **kwargs):
         core_pipeline = None
         output_size = 0
         shared_embeddings = None
@@ -247,7 +247,7 @@ class RecognitionModelInterface(ModelInterface):
                     word_vocab=word_vocab,
                     word_embedding_dim=d_model,
                     fsa_embedding_dim=fsa_embedding_dim,
-                    fsa_container=fsa_container,
+                    fsa=fsa,
                     use_padding=False,
                     dropout=dropout
                 )

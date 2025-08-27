@@ -99,6 +99,6 @@ python src/recognizers/neural_networks/train.py \
   --examples-per-checkpoint 10000 \
   "${progress_args[@]}" \
   --use-fsa-features \
-  --fsa-name "majority_structural_fsa_container" \
+  --fsa-name "$language" \
   --fsa-embedding-dim 8
-bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir"
+bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir" --use-fsa-features -fsa-name "$language" --fsa-embedding-dim 8
