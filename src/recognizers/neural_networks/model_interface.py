@@ -23,6 +23,8 @@ from rau.unidirectional import (
     OutputUnidirectional,
     Unidirectional
 )
+from rau.tools.torch.saver import construct_saver
+from rayuela.fsa.fsa import FSA
 
 from .vocabulary import get_vocabularies
 from .resettable_positional_encoding import ResettablePositionalInputLayer
@@ -192,11 +194,26 @@ class RecognitionModelInterface(ModelInterface):
             fsa_func = getattr(structural_fsas, fsa_func_name)
             fsa = fsa_func()
 
+            kwargs['fsa_name'] = args.fsa_name
             kwargs['fsa'] = fsa
             kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
             kwargs['word_vocab'] = input_vocab
 
         return kwargs
+
+    def construct_saver(self, args, vocabulary_data=None):
+        kwargs = self.get_kwargs(args, vocabulary_data)
+        output = self.get_output_directory(args)
+        saver = construct_saver(self.construct_model, output, **kwargs)
+
+        if 'fsa' in saver.kwargs:
+            del saver.kwargs['fsa']
+        if 'word_vocab' in saver.kwargs:
+            del saver.kwargs['word_vocab']
+        if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
+            saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
+
+        return saver
 
     def construct_model(self, architecture, **kwargs):
         if architecture is None:
@@ -240,7 +257,21 @@ class RecognitionModelInterface(ModelInterface):
             device=self.get_device(None)
         )
 
-    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa=None, fsa_embedding_dim=None, word_vocab=None, **kwargs):
+    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa=None, fsa_embedding_dim=None, word_vocab=None, fsa_name=None, **kwargs):
+        if use_fsa_features and fsa is None:
+            # Reconstruct FSA if loading from saved model
+            fsa_func_name = f'{fsa_name}_structural_fsa'
+            if not hasattr(structural_fsas, fsa_func_name):
+                raise ValueError(f"Cannot reconstruct unknown FSA: {fsa_name}")
+            fsa_func = getattr(structural_fsas, fsa_func_name)
+            fsa = fsa_func()
+
+        if use_fsa_features and word_vocab is None:
+            # This should not happen if get_kwargs is called correctly before this.
+            # But as a safeguard when loading a model, we might need to reconstruct vocab.
+            # For now, we rely on it being passed during training.
+            raise ValueError("word_vocab is required when using FSA features, but it was not reconstructed.")
+
         core_pipeline = None
         output_size = 0
         shared_embeddings = None
