@@ -10,6 +10,8 @@ from rau.models.transformer.input_layer import (
     SinusoidalPositionalEncodingLayer,
 )
 
+from rau.unidirectional import Unidirectional
+
 
 class FSAStateEmbedding(nn.Module):
     """
@@ -36,7 +38,7 @@ class FSAStateEmbedding(nn.Module):
         return self.embedding(state_ids)
 
 
-class FSAIntegratedInputLayer(nn.Module):
+class FSAIntegratedInputLayer(Unidirectional):
     """
     An input layer that integrates FSA state information.
     It computes word embeddings, adds positional encodings,
@@ -114,7 +116,7 @@ class FSAIntegratedInputLayer(nn.Module):
 
         self.dropout = nn.Dropout(p=dropout) if dropout is not None else None
 
-    def forward(self, word_id_sequence: torch.Tensor) -> torch.Tensor:
+    def forward(self, word_id_sequence: torch.Tensor, **kwargs) -> torch.Tensor:
         """
         Args:
             word_id_sequence: A tensor of word IDs of shape (batch_size, sequence_length).
