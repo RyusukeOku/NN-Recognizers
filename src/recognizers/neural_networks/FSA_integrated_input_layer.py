@@ -5,7 +5,6 @@ import torch
 from torch import nn
 
 from recognizers.automata.finite_automaton import FiniteAutomatonContainer
-from rau.vocab import Vocab
 from rau.models.transformer.input_layer import (
     ScaledEmbeddingLayer,
     SinusoidalPositionalEncodingLayer,
@@ -47,7 +46,7 @@ class FSAIntegratedInputLayer(nn.Module):
 
     def __init__(
         self,
-        word_vocab: Vocab,
+        word_vocab: Any,
         word_embedding_dim: int,
         fsa_embedding_dim: int,
         fsa_container: FiniteAutomatonContainer,
@@ -56,7 +55,8 @@ class FSAIntegratedInputLayer(nn.Module):
     ):
         """
         Args:
-            word_vocab: The vocabulary object for the main model.
+            word_vocab: The vocabulary object for the main model. Expected to have
+                        `__len__` and `to_string(int)` methods.
             word_embedding_dim: The dimension of word embeddings.
             fsa_embedding_dim: The dimension of FSA state embeddings.
             fsa_container: A container for the FSA, expected to have:
@@ -110,9 +110,7 @@ class FSAIntegratedInputLayer(nn.Module):
         fsa_internal_transitions = self.fsa.transitions.long()
 
         for word_idx in range(vocabulary_size):
-            # Assuming a vocab interface to get string from index.
-            # Based on `rau.vocab`, this seems to be `i2s`.
-            symbol_str = self.word_vocab.i2s[word_idx]
+            symbol_str = self.word_vocab.to_string(word_idx)
             if symbol_str in fsa_alphabet:
                 fsa_symbol_idx = fsa_alphabet[symbol_str]
                 # Copy the transitions for this symbol from the original FSA matrix.
