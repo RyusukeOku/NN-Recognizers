@@ -243,7 +243,7 @@ class RecognitionModelInterface(ModelInterface):
                 output_vocabulary_size=output_vocabulary_size, embedding_size=d_model, use_padding=False
             )
             if use_fsa_features:
-                from rau.unidirectional import StatelessLayerUnidirectional
+                from rau.unidirectional.stateless import StatelessLayerUnidirectional
                 input_layer = StatelessLayerUnidirectional(
                     FSAIntegratedInputLayer(
                         word_vocab=word_vocab,
