@@ -38,6 +38,7 @@ def main():
     model_interface.add_forward_arguments(parser)
     add_training_loop_arguments(parser)
     args = parser.parse_args()
+    model_interface.set_attributes_from_args(args)
     console_logger.info(f'parsed arguments: {args}')
 
     # Are we training on CPU or GPU?

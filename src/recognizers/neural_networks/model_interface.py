@@ -93,7 +93,7 @@ class HybridCSGModel(nn.Module):
 
 class ForceIncludeFirstFalse(Unidirectional):
     def __init__(self, module: Unidirectional):
-        super().__init__(main=True)
+        super().__init__()
         self.module = module
         self._composable_tags = getattr(module, '_composable_tags', {})
 
