@@ -144,13 +144,13 @@ class FSAIntegratedInputLayer(Unidirectional):
             fsa_state_ids[:, i] = current_states
 
         # 3. Get FSA state embeddings
-        fsa_state_embeds = self.fsa_state_embedding(fsa_state_ids)
+        fsa_state_embeds = self.fsa_state_embedding.to(device)(fsa_state_ids)
 
         # 4. Concatenate
         combined_embeds = torch.cat([word_embeds_with_pos, fsa_state_embeds], dim=-1)
 
         # 5. Project to output dimension and apply dropout
-        projected_embeds = self.projection(combined_embeds)
+        projected_embeds = self.projection.to(device)(combined_embeds)
 
         if self.dropout is not None:
             projected_embeds = self.dropout(projected_embeds)
