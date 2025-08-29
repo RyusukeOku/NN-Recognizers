@@ -221,6 +221,8 @@ class RecognitionModelInterface(ModelInterface):
         output = args.output
         saver = construct_saver(self.construct_model, output, **kwargs)
 
+        self.on_saver_constructed(args, saver)
+
         if 'fsa' in saver.kwargs:
             del saver.kwargs['fsa']
         if 'word_vocab' in saver.kwargs:
