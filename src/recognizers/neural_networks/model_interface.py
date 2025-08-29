@@ -218,22 +218,19 @@ class RecognitionModelInterface(ModelInterface):
         return kwargs
 
     def construct_saver(self, args, vocabulary_data=None):
-        kwargs = self.get_kwargs(args, vocabulary_data)
-        output = args.output
-        saver = construct_saver(self.construct_model, output, **kwargs)
+        if getattr(args, 'load', None) is not None:
+            saver = construct_saver(self.construct_model, args.load)
+            self.on_saver_constructed(args, saver)
+        else:
+            kwargs = self.get_kwargs(args, vocabulary_data)
+            output = args.output
+            saver = construct_saver(self.construct_model, output, **kwargs)
 
-        self.on_saver_constructed(args, saver)
+            self.on_saver_constructed(args, saver)
 
-        for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
-            if key in saver.kwargs:
-                del saver.kwargs[key]
-
-        # if 'fsa' in saver.kwargs:
-        #     del saver.kwargs['fsa']
-        # if 'word_vocab' in saver.kwargs:
-        #     del saver.kwargs['word_vocab']
-        # if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
-        #     saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
+            for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
+                if key in saver.kwargs:
+                    del saver.kwargs[key]
 
         return saver
 
