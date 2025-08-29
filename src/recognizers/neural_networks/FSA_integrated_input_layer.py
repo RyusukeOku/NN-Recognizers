@@ -124,8 +124,13 @@ class FSAIntegratedInputLayer(Unidirectional):
             A tensor of combined embeddings of shape
             (batch_size, sequence_length, word_embedding_dim + fsa_embedding_dim).
         """
-        batch_size, sequence_length = word_id_sequence.shape
         device = word_id_sequence.device
+        batch_size, sequence_length = word_id_sequence.shape
+
+        # Move submodules to the correct device as a workaround for device mismatch issues.
+        self.word_embedding.to(device)
+        self.positional_encoding.to(device)
+        self.fsa_state_embedding.to(device)
 
         # 1. Word embeddings with positional encoding
         word_embeds = self.word_embedding(word_id_sequence)
