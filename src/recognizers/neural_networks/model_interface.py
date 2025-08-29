@@ -103,6 +103,21 @@ class ForceIncludeFirstFalse(Unidirectional):
 
 class RecognitionModelInterface(ModelInterface):
 
+    def set_attributes_from_args(self, args):
+        """
+        Sets attributes on the interface from the parsed arguments.
+        This is called during training, before data loading, to make
+        argument-dependent information available to the data loading process.
+        """
+        self.architecture = args.architecture
+        self.use_language_modeling_head = args.use_language_modeling_head
+        self.use_next_symbols_head = args.use_next_symbols_head
+        self.add_ngram_head_n = getattr(args, 'add_ngram_head_n', 0)
+        
+        self.uses_bos = args.architecture == 'transformer' or \
+                        (args.architecture == 'hybrid_csg' and getattr(args, 'hybrid_base_architecture', None) == 'transformer')
+        self.uses_eos = args.use_language_modeling_head or args.use_next_symbols_head
+
     def add_more_init_arguments(self, group):
         group.add_argument('--architecture', choices=['transformer', 'rnn', 'lstm', 'hybrid_csg'],
             help='The type of neural network architecture to use.')
