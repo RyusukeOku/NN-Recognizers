@@ -202,15 +202,16 @@ class RecognitionModelInterface(ModelInterface):
             if args.fsa_embedding_dim is None:
                 raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
 
-            fsa_func_name = f'{args.fsa_name}_structural_fsa'
+            fsa_func_name = f'{args.fsa_name}_structural_fsa_container'
             if not hasattr(structural_fsas, fsa_func_name):
                 raise ValueError(f"Unknown FSA name: {args.fsa_name}")
             
             fsa_func = getattr(structural_fsas, fsa_func_name)
-            fsa = fsa_func()
+            fsa_container, fsa_alphabet = fsa_func()
 
             kwargs['fsa_name'] = args.fsa_name
-            kwargs['fsa'] = fsa
+            kwargs['fsa_container'] = fsa_container
+            kwargs['fsa_alphabet'] = fsa_alphabet
             kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
             kwargs['word_vocab'] = input_vocab
 
@@ -281,7 +282,7 @@ class RecognitionModelInterface(ModelInterface):
             if not hasattr(structural_fsas, fsa_func_name):
                 raise ValueError(f"Cannot reconstruct unknown FSA: {fsa_name}")
             fsa_func = getattr(structural_fsas, fsa_func_name)
-            fsa = fsa_func()
+            fsa_container, fsa_alphabet = fsa_func()
 
         if use_fsa_features and word_vocab is None:
             # This should not happen if get_kwargs is called correctly before this.
@@ -304,10 +305,11 @@ class RecognitionModelInterface(ModelInterface):
             if use_fsa_features:
                 full_input_layer = FSAIntegratedInputLayer(
                     word_vocab=word_vocab,
+                    fsa_container=fsa_container,
+                    fsa_alphabet=fsa_alphabet,
                     word_embedding_dim=d_model,
                     fsa_embedding_dim=fsa_embedding_dim,
                     output_dim=d_model,
-                    fsa=fsa,
                     use_padding=False,
                     dropout=dropout
                 )
