@@ -123,8 +123,8 @@ class FSAIntegratedInputLayer(Unidirectional):
         batch_size, sequence_length = word_id_sequence.shape
 
         # 1. Word embeddings with positional encoding
-        word_embeds = self.word_embedding(word_id_sequence)
-        word_embeds_with_pos = self.positional_encoding.forward_from_position(
+        word_embeds = self.word_embedding.to(device)(word_id_sequence)
+        word_embeds_with_pos = self.positional_encoding.to(device).forward_from_position(
             word_embeds, 0
         )
 
