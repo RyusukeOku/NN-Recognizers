@@ -224,12 +224,16 @@ class RecognitionModelInterface(ModelInterface):
 
         self.on_saver_constructed(args, saver)
 
-        if 'fsa' in saver.kwargs:
-            del saver.kwargs['fsa']
-        if 'word_vocab' in saver.kwargs:
-            del saver.kwargs['word_vocab']
-        if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
-            saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
+        for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
+            if key in saver.kwargs:
+                del saver.kwargs[key]
+
+        # if 'fsa' in saver.kwargs:
+        #     del saver.kwargs['fsa']
+        # if 'word_vocab' in saver.kwargs:
+        #     del saver.kwargs['word_vocab']
+        # if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
+        #     saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
 
         return saver
 
