@@ -277,7 +277,7 @@ class RecognitionModelInterface(ModelInterface):
     def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa=None, fsa_embedding_dim=None, word_vocab=None, fsa_name=None, **kwargs):
         if use_fsa_features and fsa is None:
             # Reconstruct FSA if loading from saved model
-            fsa_func_name = f'{fsa_name}_structural_fsa'
+            fsa_func_name = f'{fsa_name}_structural_fsa_container'
             if not hasattr(structural_fsas, fsa_func_name):
                 raise ValueError(f"Cannot reconstruct unknown FSA: {fsa_name}")
             fsa_func = getattr(structural_fsas, fsa_func_name)
