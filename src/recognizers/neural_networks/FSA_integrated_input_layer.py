@@ -146,10 +146,12 @@ class FSAIntegratedInputLayer(Unidirectional):
             batch_size, sequence_length, dtype=torch.long, device=device
         )
 
+        local_fsa_transitions = self.fsa_transitions.to(device)
+
         for i in range(sequence_length):
             input_symbols = word_id_sequence[:, i]
             # Get next states for the whole batch at once
-            current_states = self.fsa_transitions[current_states, input_symbols]
+            current_states = local_fsa_transitions[current_states, input_symbols]
             fsa_state_ids[:, i] = current_states
 
         # 3. Get FSA state embeddings
