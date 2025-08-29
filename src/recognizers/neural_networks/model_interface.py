@@ -302,16 +302,15 @@ class RecognitionModelInterface(ModelInterface):
                 output_vocabulary_size=output_vocabulary_size, embedding_size=d_model, use_padding=False
             )
             if use_fsa_features:
-                input_layer = FSAIntegratedInputLayer(
+                full_input_layer = FSAIntegratedInputLayer(
                     word_vocab=word_vocab,
                     word_embedding_dim=d_model,
                     fsa_embedding_dim=fsa_embedding_dim,
+                    output_dim=d_model,
                     fsa=fsa,
                     use_padding=False,
                     dropout=dropout
                 )
-                projection = Layer(d_model + fsa_embedding_dim, d_model)
-                full_input_layer = input_layer @ projection
             else:
                 if positional_encoding == 'resettable':
                     full_input_layer = ResettablePositionalInputLayer(
