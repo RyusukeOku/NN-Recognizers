@@ -74,7 +74,7 @@ class FSAIntegratedInputLayer(Unidirectional):
 
         self.word_vocab = word_vocab
         vocabulary_size = len(self.word_vocab)
-        num_states = fsa_container.num_states
+        num_states = fsa_container.num_states()
         self.start_state_id = fsa_container.initial_state()
 
         # Build transition tensor from the container
