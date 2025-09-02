@@ -42,10 +42,6 @@ class FSAStateEmbedding(nn.Module):
 class FSAIntegratedInputLayer(Unidirectional):
     """
     An input layer that integrates FSA state information.
-    It computes word embeddings, adds positional encodings,
-    computes FSA state embeddings for each position in the input sequence,
-    concatenates the word/position embeddings with the FSA state embeddings,
-    and finally projects the result to the model's hidden dimension.
     """
 
     def __init__(
@@ -59,17 +55,6 @@ class FSAIntegratedInputLayer(Unidirectional):
         use_padding: bool,
         dropout: float | None = None,
     ):
-        """
-        Args:
-            word_vocab: The vocabulary object for the main model. Expected to have
-                        `__len__` and `to_string(int)` methods.
-            word_embedding_dim: The dimension of word embeddings.
-            fsa_embedding_dim: The dimension of FSA state embeddings.
-            output_dim: The final output dimension of the layer.
-            fsa: A rayuela.fsa.fsa.FSA object.
-            use_padding: Whether to use padding for word embeddings.
-            dropout: Dropout rate.
-        """
         super().__init__()
 
         self.word_vocab = word_vocab
@@ -79,7 +64,6 @@ class FSAIntegratedInputLayer(Unidirectional):
 
         # Build transition tensor from the container
         fsa_symbol_to_id = {symbol: i for i, symbol in enumerate(fsa_alphabet)}
-
         fsa_transitions = torch.arange(
             num_states, dtype=torch.long
         ).unsqueeze(1).expand(num_states, len(fsa_alphabet))
@@ -99,6 +83,7 @@ class FSAIntegratedInputLayer(Unidirectional):
 
         self.register_buffer("fsa_transitions", expanded_transitions)
 
+        # Initialize layers
         self.word_embedding = ScaledEmbeddingLayer(
             vocabulary_size=vocabulary_size,
             output_size=word_embedding_dim,
@@ -110,17 +95,15 @@ class FSAIntegratedInputLayer(Unidirectional):
             num_states=num_states,
             embedding_dim=fsa_embedding_dim,
         )
-        self.projection = nn.Liner(word_embedding_dim + fsa_embedding_dim, output_dim)
-        self.dropout = nn.Dropout(p=dropout)
-
+        self.projection = nn.Linear(word_embedding_dim + fsa_embedding_dim, output_dim)
+        self.dropout = nn.Dropout(p=dropout) if dropout is not None else None
 
     def forward(self, word_id_sequence: torch.Tensor, **kwargs) -> torch.Tensor:
         device = word_id_sequence.device
         batch_size, sequence_length = word_id_sequence.shape
-
         # 1. Word embeddings with positional encoding
-        word_embeds = self.word_embedding(word_id_sequence)
-        word_embeds_with_pos = self.positional_encoding.forward_from_position(
+        word_embeds = self.word_embedding.to(device)(word_id_sequence)
+        word_embeds_with_pos = self.positional_encoding.to(device).forward_from_position(
             word_embeds, 0
         )
 
@@ -140,13 +123,13 @@ class FSAIntegratedInputLayer(Unidirectional):
             fsa_state_ids[:, i] = current_states
 
         # 3. Get FSA state embeddings
-        fsa_state_embeds = self.fsa_state_embedding(fsa_state_ids)
+        fsa_state_embeds = self.fsa_state_embedding.to(device)(fsa_state_ids)
 
         # 4. Concatenate
         combined_embeds = torch.cat([word_embeds_with_pos, fsa_state_embeds], dim=-1)
 
         # 5. Project to output dimension and apply dropout
-        projected_embeds = self.projection(combined_embeds)
+        projected_embeds = self.projection.to(device)(combined_embeds)
 
         if self.dropout is not None:
             projected_embeds = self.dropout(projected_embeds)

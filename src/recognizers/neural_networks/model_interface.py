@@ -218,24 +218,30 @@ class RecognitionModelInterface(ModelInterface):
         return kwargs
 
     def construct_saver(self, args, vocabulary_data=None):
+        # If loading, let the saver load kwargs from the directory.
+        # Otherwise, get kwargs from the command-line arguments.
         if getattr(args, 'load', None) is not None:
+            # Loading path
             saver = construct_saver(self.construct_model, args.load)
             self.on_saver_constructed(args, saver)
         else:
+            # Training path
             kwargs = self.get_kwargs(args, vocabulary_data)
             output = args.output
             saver = construct_saver(self.construct_model, output, **kwargs)
 
             self.on_saver_constructed(args, saver)
 
-            for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
-                if key in saver.kwargs:
-                    del saver.kwargs[key]
+        # Remove non-serializable arguments before saving.
+        for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
+            if key in saver.kwargs:
+                del saver.kwargs[key]
 
-            if 'rest_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
+            if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
                 saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
 
         return saver
+
 
     def construct_model(self, architecture, **kwargs):
         if architecture is None:
