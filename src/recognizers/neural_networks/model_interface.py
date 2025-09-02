@@ -243,7 +243,7 @@ class RecognitionModelInterface(ModelInterface):
         return saver
 
 
-    def construct_model(self, architecture, **kwargs):
+    def construct_model(self, architecture=None, **kwargs):
         # When loading a saved model, `architecture` will be inside kwargs.
         if architecture is None:
             architecture = kwargs.get('architecture')
