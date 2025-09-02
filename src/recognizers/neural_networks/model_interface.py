@@ -220,9 +220,9 @@ class RecognitionModelInterface(ModelInterface):
     def construct_saver(self, args, vocabulary_data=None):
         # If loading, let the saver load kwargs from the directory.
         # Otherwise, get kwargs from the command-line arguments.
-        if getattr(args, 'load', None) is not None:
+        if getattr(args, 'load_model', None) is not None:
             # Loading path
-            saver = construct_saver(self.construct_model, args.load)
+            saver = construct_saver(self.construct_model, args.load_model)
             self.on_saver_constructed(args, saver)
         else:
             # Training path
