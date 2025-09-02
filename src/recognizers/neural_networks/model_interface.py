@@ -244,9 +244,13 @@ class RecognitionModelInterface(ModelInterface):
 
 
     def construct_model(self, architecture, **kwargs):
+        # When loading a saved model, `architecture` will be inside kwargs.
         if architecture is None:
-            raise ValueError
-        
+            architecture = kwargs.get('architecture')
+
+        if architecture is None:
+            raise ValueError("Architecture is missing and could not be found in kwargs.")
+
         if architecture == 'hybrid_csg':
             return self._construct_hybrid_model(**kwargs)
         else:
