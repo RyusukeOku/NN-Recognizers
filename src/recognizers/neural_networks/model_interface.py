@@ -23,7 +23,7 @@ from rau.unidirectional import (
     OutputUnidirectional,
     Unidirectional
 )
-from rau.tools.torch.saver import construct_saver
+from rau.tools.torch.saver import read_saver, construct_saver
 from rayuela.fsa.fsa import FSA
 
 from .vocabulary import get_vocabularies
@@ -36,6 +36,7 @@ import argparse
 import json
 from pathlib import Path
 from .data import load_vocabulary_data
+import random
 
 @dataclasses.dataclass
 class ModelInput:
@@ -221,60 +222,73 @@ class RecognitionModelInterface(ModelInterface):
 
         return kwargs
 
-    # def construct_saver(self, args, vocabulary_data=None):
-    #     # If loading, let the saver load kwargs from the directory.
-    #     # Otherwise, get kwargs from the command-line arguments.
-    #     if getattr(args, 'load_model', None) is not None:
-    #         # --- Loading Path ---
-    #         import json
-    #         from pathlib import Path
+    def construct_saver(self, args, vocabulary_data=None):
+        # Override the base method to correctly handle loading vs. training.
+        device = self.get_device(args)
+        # Check if we are loading a pre-trained model
+        if self.use_load and getattr(args, 'load_model', None) is not None:
+            # --- LOADING PATH ---
+            if args.load_model is None:
+                self.fail_argument_check('Argument --load-model is missing.')
 
-    #         load_path = Path(args.load_model)
-    #         kwargs_path = load_path / 'kwargs.json'
-    #         if not kwargs_path.is_file():
-    #             raise FileNotFoundError(f"Cannot find kwargs.json in {load_path}")
+            # 1. Manually load kwargs.json to get model configuration
+            kwargs_path = Path(args.load_model) / 'kwargs.json'
+            if not kwargs_path.is_file():
+                raise FileNotFoundError(f"Cannot find kwargs.json in {args.load_model}")
+            with open(kwargs_path, 'r') as f:
+                loaded_kwargs = json.load(f)
 
-    #         with open(kwargs_path, 'r') as f:
-    #             kwargs = json.load(f)
+            # 2. Create a temporary args object from loaded kwargs to pass to get_kwargs
+            temp_args = argparse.Namespace(**loaded_kwargs)
 
-    #         # Reconstruct non-serializable objects
-    #         # The vocabulary is needed to correctly initialize the model size.
-    #         # We get the vocabulary_data path from the training_data argument.
+            # 3. Reconstruct non-serializable objects (like vocab) using the loaded config
+            if vocabulary_data is None:
+                # In evaluation, vocabulary_data is not passed to construct_saver,
+                # so we need to load it using the --training-data argument.
+                if not hasattr(args, 'training_data') or args.training_data is None:
+                    raise ValueError("--training-data is required to load vocabulary for evaluation.")
+                vocabulary_data = load_vocabulary_data(args, self.parser)
 
-    #         # We need to re-run parts of get_kwargs to reconstruct the vocab
-    #         # and other non-serialized objects.
-    #         # This is complex. A simpler way is to pass all necessary serializable args
-    #         # from the loaded kwargs to get_kwargs.
+            # 4. Call get_kwargs to reconstruct vocab, fsa_container, etc.
+            full_kwargs = self.get_kwargs(temp_args, vocabulary_data)
 
-    #         # Let's create a temporary args namespace from the loaded kwargs
-    #         temp_args = argparse.Namespace(**kwargs)
+            # 5. Construct model with full kwargs, then load weights into it
+            saver = read_saver(self.construct_model, args.load_model, args.load_parameters, device, **full_kwargs)
+            if self.use_output and args.output is not None:
+                saver = saver.to_directory(args.output)
+                saver.check_output()
+        else:
+            # --- TRAINING PATH ---
+            if self.use_init:
+                kwargs = self.get_kwargs(args, vocabulary_data)
+                output = args.output
+                # Construct the saver, which also constructs the model
+                saver = construct_saver(self.construct_model, output, **kwargs)
 
-    #         # We also need some args from the current command line
-    #         temp_args.training_data = args.training_data
+                # After model construction, remove non-serializable objects before saving.
+                for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
+                    if key in saver.kwargs:
+                       del saver.kwargs[key]
+                if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
+                    saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
 
-    #         # Now call get_kwargs with the reconstructed args
-    #         full_kwargs = self.get_kwargs(temp_args, vocabulary_data)
+                saver.save_kwargs()
+                saver.model.to(device)
 
-    #         saver = construct_saver(self.construct_model, args.load_model, **full_kwargs)
-    #         self.on_saver_constructed(args, saver)
-    #     else:
-    #         # Training path
-    #         kwargs = self.get_kwargs(args, vocabulary_data)
-    #         output = args.output
-    #         saver = construct_saver(self.construct_model, output, **kwargs)
+                self.parameter_seed = args.parameter_seed
+                if self.parameter_seed is None:
+                    self.parameter_seed = random.getrandbits(32)
+                if device.type == 'cuda':
+                    torch.manual_seed(self.parameter_seed)
+                    param_generator = None
+                else:
+                    param_generator = torch.manual_seed(self.parameter_seed)
+                    self.initialize(args, saver.model, param_generator)
+            else:
+                raise ValueError("Either --load-model must be specified or the interface must be in 'init' mode.")
 
-    #         self.on_saver_constructed(args, saver)
-
-    #     # Remove non-serializable arguments before saving.
-    #     for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
-    #         if key in saver.kwargs:
-    #             del saver.kwargs[key]
-
-    #         if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
-    #             saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
-
-    #     return saver
-
+        self.on_saver_constructed(args, saver)
+        return saver
 
     def construct_model(self, architecture=None, **kwargs):
         # When loading a saved model, `architecture` will be inside kwargs.
