@@ -32,6 +32,10 @@ from .ngram_head import NgramHead
 from .lba import NeuralLBA
 from .FSA_integrated_input_layer import FSAIntegratedInputLayer
 import recognizers.automata.structural_fsas as structural_fsas
+import argparse
+import json
+from pathlib import Path
+from .data import load_vocabulary_data
 
 @dataclasses.dataclass
 class ModelInput:
@@ -221,8 +225,37 @@ class RecognitionModelInterface(ModelInterface):
         # If loading, let the saver load kwargs from the directory.
         # Otherwise, get kwargs from the command-line arguments.
         if getattr(args, 'load_model', None) is not None:
-            # Loading path
-            saver = construct_saver(self.construct_model, args.load_model)
+            # --- Loading Path ---
+            import json
+            from pathlib import Path
+
+            load_path = Path(args.load_model)
+            kwargs_path = load_path / 'kwargs.json'
+            if not kwargs_path.is_file():
+                raise FileNotFoundError(f"Cannot find kwargs.json in {load_path}")
+
+            with open(kwargs_path, 'r') as f:
+                kwargs = json.load(f)
+
+            # Reconstruct non-serializable objects
+            # The vocabulary is needed to correctly initialize the model size.
+            # We get the vocabulary_data path from the training_data argument.
+
+            # We need to re-run parts of get_kwargs to reconstruct the vocab
+            # and other non-serialized objects.
+            # This is complex. A simpler way is to pass all necessary serializable args
+            # from the loaded kwargs to get_kwargs.
+
+            # Let's create a temporary args namespace from the loaded kwargs
+            temp_args = argparse.Namespace(**kwargs)
+
+            # We also need some args from the current command line
+            temp_args.training_data = args.training_data
+
+            # Now call get_kwargs with the reconstructed args
+            full_kwargs = self.get_kwargs(temp_args, vocabulary_data)
+
+            saver = construct_saver(self.construct_model, args.load_model, **full_kwargs)
             self.on_saver_constructed(args, saver)
         else:
             # Training path
