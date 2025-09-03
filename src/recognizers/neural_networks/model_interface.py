@@ -322,8 +322,8 @@ class RecognitionModelInterface(ModelInterface):
             device=self.get_device(None)
         )
 
-    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa=None, fsa_embedding_dim=None, word_vocab=None, fsa_name=None, **kwargs):
-        if use_fsa_features and fsa is None:
+    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa_container=None, fsa_alphabet=None, word_vocab=None, fsa_name=None, fsa_embedding_dim=None, **kwargs):
+        if use_fsa_features and fsa_container is None:
             # Reconstruct FSA if loading from saved model
             fsa_func_name = f'{fsa_name}_structural_fsa_container'
             if not hasattr(structural_fsas, fsa_func_name):
