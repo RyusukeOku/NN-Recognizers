@@ -207,7 +207,10 @@ class RecognitionModelInterface(ModelInterface):
             if args.fsa_embedding_dim is None:
                 raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
 
-            fsa_func_name = f'{args.fsa_name}_structural_fsa_container'
+            # Convert kebab-case fsa_name from command line to snake_case for function lookup
+            fsa_name_snake_case = args.fsa_name.replace('-', '_')
+            fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
+
             if not hasattr(structural_fsas, fsa_func_name):
                 raise ValueError(f"Unknown FSA name: {args.fsa_name}")
             
