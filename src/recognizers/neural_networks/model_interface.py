@@ -283,7 +283,6 @@ class RecognitionModelInterface(ModelInterface):
                 if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
                     saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
 
-                saver.save_kwargs()
                 saver.model.to(device)
 
                 self.parameter_seed = args.parameter_seed

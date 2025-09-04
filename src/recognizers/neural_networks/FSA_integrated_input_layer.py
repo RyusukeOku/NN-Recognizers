@@ -67,6 +67,7 @@ class FSAIntegratedInputLayer(Unidirectional):
         fsa_transitions = torch.arange(
             num_states, dtype=torch.long
         ).unsqueeze(1).expand(num_states, len(fsa_alphabet))
+        fsa_transitions = fsa_transitions.clone()
 
         for t in fsa_container.transitions():
             fsa_transitions[t.state_from, t.symbol] = t.state_to
@@ -74,6 +75,7 @@ class FSAIntegratedInputLayer(Unidirectional):
         expanded_transitions = torch.arange(
             num_states, dtype=torch.long
         ).unsqueeze(1).expand(num_states, vocabulary_size)
+        expanded_transitions = expanded_transitions.clone()
 
         for word_idx in range(vocabulary_size):
             symbol_str = self.word_vocab.to_string(word_idx)
