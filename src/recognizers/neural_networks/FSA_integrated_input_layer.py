@@ -99,15 +99,19 @@ class FSAIntegratedInputLayer(Unidirectional):
         self.dropout = nn.Dropout(p=dropout) if dropout is not None else None
 
     def forward(self, word_id_sequence: torch.Tensor, **kwargs) -> torch.Tensor:
-        device = word_id_sequence.device
+
         batch_size, sequence_length = word_id_sequence.shape
+        device = word_id_sequence.device
+
         # 1. Word embeddings with positional encoding
-        word_embeds = self.word_embedding.to(device)(word_id_sequence)
-        word_embeds_with_pos = self.positional_encoding.to(device).forward_from_position(
+        # Modules are already on the correct device from the main .to(device) call
+        word_embeds = self.word_embedding(word_id_sequence)
+        word_embeds_with_pos = self.positional_encoding.forward_from_position(
             word_embeds, 0
         )
 
         # 2. Compute FSA state sequence
+        # self.fsa_transitions is a buffer and is already on the correct device
         current_states = torch.full(
             (batch_size,), self.start_state_id, dtype=torch.long, device=device
         )
@@ -115,21 +119,19 @@ class FSAIntegratedInputLayer(Unidirectional):
             batch_size, sequence_length, dtype=torch.long, device=device
         )
 
-        local_fsa_transitions = self.fsa_transitions.to(device)
-
         for i in range(sequence_length):
             input_symbols = word_id_sequence[:, i]
-            current_states = local_fsa_transitions[current_states, input_symbols]
+            current_states = self.fsa_transitions[current_states, input_symbols]
             fsa_state_ids[:, i] = current_states
 
         # 3. Get FSA state embeddings
-        fsa_state_embeds = self.fsa_state_embedding.to(device)(fsa_state_ids)
+        fsa_state_embeds = self.fsa_state_embedding(fsa_state_ids)
 
         # 4. Concatenate
         combined_embeds = torch.cat([word_embeds_with_pos, fsa_state_embeds], dim=-1)
 
         # 5. Project to output dimension and apply dropout
-        projected_embeds = self.projection.to(device)(combined_embeds)
+        projected_embeds = self.projection(combined_embeds)
 
         if self.dropout is not None:
             projected_embeds = self.dropout(projected_embeds)
