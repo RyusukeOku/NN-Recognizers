@@ -156,11 +156,11 @@ class RecognitionModelInterface(ModelInterface):
         group.add_argument('--lba-hidden-size', type=int, default=40, help='(hybrid_csg) Hidden size for NeuralLBA.')
         group.add_argument('--lba-n-steps', type=int, default=100, help='(hybrid_csg) Number of steps for NeuralLBA.')
         group.add_argument('--use-fsa-features', action='store_true', default=False,
-            help='(transformer only) Use FSA state features in the input layer.')
+            help='Use FSA state features in the input layer.')
         group.add_argument('--fsa-name', type=str,
-            help='(transformer with --use-fsa-features) Name of the structural FSA to use.')
+            help='Name of the structural FSA to use (when --use-fsa-features is enabled).')
         group.add_argument('--fsa-embedding-dim', type=int,
-            help='(transformer with --use-fsa-features) Dimension of the FSA state embeddings.')
+            help='Dimension of the FSA state embeddings (when --use-fsa-features is enabled).')
 
 
     def get_kwargs(self, args, vocabulary_data):
@@ -200,8 +200,6 @@ class RecognitionModelInterface(ModelInterface):
 
         kwargs['use_fsa_features'] = args.use_fsa_features
         if args.use_fsa_features:
-            if args.architecture != 'transformer':
-                raise ValueError('--use-fsa-features is only supported for --architecture=transformer')
             if args.fsa_name is None:
                 raise ValueError('--fsa-name is required when using --use-fsa-features')
             if args.fsa_embedding_dim is None:
@@ -421,15 +419,33 @@ class RecognitionModelInterface(ModelInterface):
             )
             RecurrentModel = SimpleRNN if architecture == 'rnn' else LSTM
             core = RecurrentModel(input_size=hidden_units, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
-            core_pipeline = (
-                EmbeddingUnidirectional(
-                    vocabulary_size=input_vocabulary_size, output_size=hidden_units,
-                    use_padding=False, shared_embeddings=shared_embeddings
-                ) @
-                DropoutUnidirectional(dropout) @
-                core.main() @
-                DropoutUnidirectional(dropout)
-            )
+            
+            if use_fsa_features:
+                full_input_layer = FSAIntegratedInputLayer(
+                    word_vocab=word_vocab,
+                    fsa_container=fsa_container,
+                    fsa_alphabet=fsa_alphabet,
+                    word_embedding_dim=hidden_units,
+                    fsa_embedding_dim=fsa_embedding_dim,
+                    output_dim=hidden_units,
+                    use_padding=False,
+                    dropout=dropout
+                )
+                core_pipeline = (
+                    full_input_layer @
+                    core.main() @
+                    DropoutUnidirectional(dropout)
+                )
+            else:
+                core_pipeline = (
+                    EmbeddingUnidirectional(
+                        vocabulary_size=input_vocabulary_size, output_size=hidden_units,
+                        use_padding=False, shared_embeddings=shared_embeddings
+                    ) @
+                    DropoutUnidirectional(dropout) @
+                    core.main() @
+                    DropoutUnidirectional(dropout)
+                )
             output_size = hidden_units
         else:
             raise ValueError(f"Unknown standard architecture: {architecture}")
