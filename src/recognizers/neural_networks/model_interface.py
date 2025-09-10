@@ -20,13 +20,23 @@ from rau.models.transformer.unidirectional_encoder import UnidirectionalTransfor
 from rau.unidirectional import (
     EmbeddingUnidirectional,
     DropoutUnidirectional,
-    OutputUnidirectional
+    OutputUnidirectional,
+    Unidirectional
 )
+from rau.tools.torch.saver import read_saver, construct_saver
+from rayuela.fsa.fsa import FSA
 
 from .vocabulary import get_vocabularies
 from .resettable_positional_encoding import ResettablePositionalInputLayer
 from .ngram_head import NgramHead
 from .lba import NeuralLBA
+from .FSA_integrated_input_layer import FSAIntegratedInputLayer
+import recognizers.automata.structural_fsas as structural_fsas
+import argparse
+import json
+from pathlib import Path
+from .data import load_vocabulary_data
+import random
 
 @dataclasses.dataclass
 class ModelInput:
@@ -86,7 +96,32 @@ class HybridCSGModel(nn.Module):
 
         return logits, None, None
 
+class ForceIncludeFirstFalse(Unidirectional):
+    def __init__(self, module: Unidirectional):
+        super().__init__()
+        self.module = module
+        self._composable_tags = getattr(module, '_composable_tags', {})
+
+    def forward(self, input_sequence: torch.Tensor, *args, **kwargs):
+        kwargs['include_first'] = False
+        return self.module(input_sequence, *args, **kwargs)
+
 class RecognitionModelInterface(ModelInterface):
+
+    def set_attributes_from_args(self, args):
+        """
+        Sets attributes on the interface from the parsed arguments.
+        This is called during training, before data loading, to make
+        argument-dependent information available to the data loading process.
+        """
+        self.architecture = args.architecture
+        self.use_language_modeling_head = args.use_language_modeling_head
+        self.use_next_symbols_head = args.use_next_symbols_head
+        self.add_ngram_head_n = getattr(args, 'add_ngram_head_n', 0)
+        
+        self.uses_bos = args.architecture == 'transformer' or \
+                        (args.architecture == 'hybrid_csg' and getattr(args, 'hybrid_base_architecture', None) == 'transformer')
+        self.uses_eos = args.use_language_modeling_head or args.use_next_symbols_head
 
     def add_more_init_arguments(self, group):
         group.add_argument('--architecture', choices=['transformer', 'rnn', 'lstm', 'hybrid_csg'],
@@ -120,6 +155,12 @@ class RecognitionModelInterface(ModelInterface):
         group.add_argument('--embedding-size', type=int, help='(hybrid_csg) Embedding size.')
         group.add_argument('--lba-hidden-size', type=int, default=40, help='(hybrid_csg) Hidden size for NeuralLBA.')
         group.add_argument('--lba-n-steps', type=int, default=100, help='(hybrid_csg) Number of steps for NeuralLBA.')
+        group.add_argument('--use-fsa-features', action='store_true', default=False,
+            help='Use FSA state features in the input layer.')
+        group.add_argument('--fsa-name', type=str,
+            help='Name of the structural FSA to use (when --use-fsa-features is enabled).')
+        group.add_argument('--fsa-embedding-dim', type=int,
+            help='Dimension of the FSA state embeddings (when --use-fsa-features is enabled).')
 
 
     def get_kwargs(self, args, vocabulary_data):
@@ -134,7 +175,7 @@ class RecognitionModelInterface(ModelInterface):
         if args.positional_encoding == 'resettable':
             reset_symbol_ids = {input_vocab.to_int(s) for s in args.reset_symbols if s in input_vocab}
         
-        return dict(
+        kwargs = dict(
             architecture=args.architecture,
             add_ngram_head_n=getattr(args, 'add_ngram_head_n', 0),
             hybrid_base_architecture=getattr(args, 'hybrid_base_architecture', None),
@@ -157,10 +198,117 @@ class RecognitionModelInterface(ModelInterface):
             lba_n_steps=getattr(args, 'lba_n_steps', 50)
         )
 
-    def construct_model(self, architecture, **kwargs):
+        kwargs['use_fsa_features'] = args.use_fsa_features
+        if args.use_fsa_features:
+            if args.fsa_name is None:
+                raise ValueError('--fsa-name is required when using --use-fsa-features')
+            if args.fsa_embedding_dim is None:
+                raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
+
+            # Convert kebab-case fsa_name from command line to snake_case for function lookup
+            fsa_name_snake_case = args.fsa_name.replace('-', '_')
+            fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
+
+            if not hasattr(structural_fsas, fsa_func_name):
+                raise ValueError(f"Unknown FSA name: {args.fsa_name}")
+            
+            fsa_func = getattr(structural_fsas, fsa_func_name)
+            fsa_container, fsa_alphabet = fsa_func()
+
+            kwargs['fsa_name'] = args.fsa_name
+            kwargs['fsa_container'] = fsa_container
+            kwargs['fsa_alphabet'] = fsa_alphabet
+            kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
+            kwargs['word_vocab'] = input_vocab
+
+        return kwargs
+
+    def construct_saver(self, args, vocabulary_data=None):
+        device = self.get_device(args)
+
+        if self.use_load and getattr(args, 'load_model', None) is not None:
+            # --- LOADING PATH ---
+            if args.load_model is None:
+                self.fail_argument_check('Argument --load-model is missing.')
+
+            kwargs_path = Path(args.load_model) / 'kwargs.json'
+            if not kwargs_path.is_file():
+                raise FileNotFoundError(f"Cannot find kwargs.json in {args.load_model}")
+            with open(kwargs_path, 'r') as f:
+                loaded_kwargs = json.load(f)
+
+            temp_args = argparse.Namespace(**loaded_kwargs)
+            for key, value in vars(args).items():
+                if value is not None:
+                    setattr(temp_args, key, value)
+
+            if vocabulary_data is None:
+                if not hasattr(args, 'training_data') or args.training_data is None:
+                    raise ValueError("--training-data is required to load vocabulary for evaluation.")
+                vocabulary_data = load_vocabulary_data(args, self.parser)
+
+            full_kwargs_for_construction = self.get_kwargs(temp_args, vocabulary_data)
+
+            # This wrapper ignores the kwargs passed by read_saver (from kwargs.json)
+            # and uses our fully reconstructed kwargs instead.
+            def model_constructor_wrapper(**ignored_kwargs):
+                return self.construct_model(**full_kwargs_for_construction)
+
+            # read_saver will use our wrapper to build the model shell,
+            # then it will load the parameters into it.
+            saver = read_saver(
+                model_constructor_wrapper,
+                args.load_model,
+                args.load_parameters,
+                device
+            )
+            
+            # After loading, ensure the saver's kwargs are the complete ones
+            saver.kwargs = full_kwargs_for_construction
+
+            if self.use_output and args.output is not None:
+                saver = saver.to_directory(args.output)
+                saver.check_output()
+        else:
+            # --- TRAINING PATH ---
+            if self.use_init:
+                kwargs = self.get_kwargs(args, vocabulary_data)
+                output = args.output
+                # Construct the saver, which also constructs the model
+                saver = construct_saver(self.construct_model, output, **kwargs)
+
+                # After model construction, remove non-serializable objects before saving.
+                for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
+                    if key in saver.kwargs:
+                        del saver.kwargs[key]
+                if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
+                    saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
+
+                saver.model.to(device)
+
+                self.parameter_seed = args.parameter_seed
+                if self.parameter_seed is None:
+                    self.parameter_seed = random.getrandbits(32)
+                if device.type == 'cuda':
+                    torch.manual_seed(self.parameter_seed)
+                    param_generator = None
+                else:
+                    param_generator = torch.manual_seed(self.parameter_seed)
+                    self.initialize(args, saver.model, param_generator)
+            else:
+                raise ValueError("Either --load-model must be specified or the interface must be in 'init' mode.")
+
+        self.on_saver_constructed(args, saver)
+        return saver
+
+    def construct_model(self, architecture=None, **kwargs):
+        # When loading a saved model, `architecture` will be inside kwargs.
         if architecture is None:
-            raise ValueError
-        
+            architecture = kwargs.get('architecture')
+
+        if architecture is None:
+            raise ValueError("Architecture is missing and could not be found in kwargs.")
+
         if architecture == 'hybrid_csg':
             return self._construct_hybrid_model(**kwargs)
         else:
@@ -199,7 +347,21 @@ class RecognitionModelInterface(ModelInterface):
             device=self.get_device(None)
         )
 
-    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, **kwargs):
+    def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa_container=None, fsa_alphabet=None, word_vocab=None, fsa_name=None, fsa_embedding_dim=None, **kwargs):
+        if use_fsa_features and fsa_container is None:
+            # Reconstruct FSA if loading from saved model
+            fsa_func_name = f'{fsa_name}_structural_fsa_container'
+            if not hasattr(structural_fsas, fsa_func_name):
+                raise ValueError(f"Cannot reconstruct unknown FSA: {fsa_name}")
+            fsa_func = getattr(structural_fsas, fsa_func_name)
+            fsa_container, fsa_alphabet = fsa_func()
+
+        if use_fsa_features and word_vocab is None:
+            # This should not happen if get_kwargs is called correctly before this.
+            # But as a safeguard when loading a model, we might need to reconstruct vocab.
+            # For now, we rely on it being passed during training.
+            raise ValueError("word_vocab is required when using FSA features, but it was not reconstructed.")
+
         core_pipeline = None
         output_size = 0
         shared_embeddings = None
@@ -212,23 +374,38 @@ class RecognitionModelInterface(ModelInterface):
                 tie_embeddings=use_language_modeling_head, input_vocabulary_size=input_vocabulary_size,
                 output_vocabulary_size=output_vocabulary_size, embedding_size=d_model, use_padding=False
             )
-            if positional_encoding == 'resettable':
-                input_layer = ResettablePositionalInputLayer(
-                    vocabulary_size=input_vocabulary_size, d_model=d_model, reset_symbols=reset_symbol_ids,
-                    dropout=dropout, use_padding=False, shared_embeddings=shared_embeddings
+            if use_fsa_features:
+                full_input_layer = FSAIntegratedInputLayer(
+                    word_vocab=word_vocab,
+                    fsa_container=fsa_container,
+                    fsa_alphabet=fsa_alphabet,
+                    word_embedding_dim=d_model,
+                    fsa_embedding_dim=fsa_embedding_dim,
+                    output_dim=d_model,
+                    use_padding=False,
+                    dropout=dropout
                 )
             else:
-                input_layer = get_transformer_input_unidirectional(
-                    vocabulary_size=input_vocabulary_size, d_model=d_model, dropout=dropout,
-                    use_padding=False, shared_embeddings=shared_embeddings
-                )
+                if positional_encoding == 'resettable':
+                    full_input_layer = ResettablePositionalInputLayer(
+                        vocabulary_size=input_vocabulary_size, d_model=d_model, reset_symbols=reset_symbol_ids,
+                        dropout=dropout, use_padding=False, shared_embeddings=shared_embeddings
+                    )
+                else:
+                    full_input_layer = get_transformer_input_unidirectional(
+                        vocabulary_size=input_vocabulary_size, d_model=d_model, dropout=dropout,
+                        use_padding=False, shared_embeddings=shared_embeddings
+                    )
             
+            encoder = UnidirectionalTransformerEncoderLayers(
+                num_layers=num_layers, d_model=d_model, num_heads=num_heads,
+                feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
+            ).main()
+            wrapped_encoder = ForceIncludeFirstFalse(encoder)
+
             core_pipeline = (
-                input_layer @
-                UnidirectionalTransformerEncoderLayers(
-                    num_layers=num_layers, d_model=d_model, num_heads=num_heads,
-                    feedforward_size=feedforward_size, dropout=dropout, use_final_layer_norm=True
-                ).main()
+                full_input_layer @
+                wrapped_encoder
             )
             output_size = d_model
 
@@ -242,15 +419,33 @@ class RecognitionModelInterface(ModelInterface):
             )
             RecurrentModel = SimpleRNN if architecture == 'rnn' else LSTM
             core = RecurrentModel(input_size=hidden_units, hidden_units=hidden_units, layers=num_layers, dropout=dropout, learned_hidden_state=True)
-            core_pipeline = (
-                EmbeddingUnidirectional(
-                    vocabulary_size=input_vocabulary_size, output_size=hidden_units,
-                    use_padding=False, shared_embeddings=shared_embeddings
-                ) @
-                DropoutUnidirectional(dropout) @
-                core.main() @
-                DropoutUnidirectional(dropout)
-            )
+            
+            if use_fsa_features:
+                full_input_layer = FSAIntegratedInputLayer(
+                    word_vocab=word_vocab,
+                    fsa_container=fsa_container,
+                    fsa_alphabet=fsa_alphabet,
+                    word_embedding_dim=hidden_units,
+                    fsa_embedding_dim=fsa_embedding_dim,
+                    output_dim=hidden_units,
+                    use_padding=False,
+                    dropout=dropout
+                )
+                core_pipeline = (
+                    full_input_layer @
+                    core.main() @
+                    DropoutUnidirectional(dropout)
+                )
+            else:
+                core_pipeline = (
+                    EmbeddingUnidirectional(
+                        vocabulary_size=input_vocabulary_size, output_size=hidden_units,
+                        use_padding=False, shared_embeddings=shared_embeddings
+                    ) @
+                    DropoutUnidirectional(dropout) @
+                    core.main() @
+                    DropoutUnidirectional(dropout)
+                )
             output_size = hidden_units
         else:
             raise ValueError(f"Unknown standard architecture: {architecture}")
@@ -276,6 +471,19 @@ class RecognitionModelInterface(ModelInterface):
         smart_init(model, generator, fallback=uniform_fallback(args.init_scale))
 
     def on_saver_constructed(self, args, saver):
+        # First, let the base class do its setup
+        super().on_saver_constructed(args, saver)
+
+        # Now, remove non-serializable arguments from the kwargs that will be saved.
+        # This prevents the JSON serialization error during training,
+        # while ensuring the objects were available during model construction.
+        for key in ['fsa', 'fsa_container', 'fsa_alphabet', 'word_vocab']:
+            if key in saver.kwargs:
+                del saver.kwargs[key]
+
+        if 'reset_symbol_ids' in saver.kwargs and saver.kwargs['reset_symbol_ids'] is not None:
+            saver.kwargs['reset_symbol_ids'] = sorted(list(saver.kwargs['reset_symbol_ids']))
+
         self.bos_index = saver.kwargs['bos_index']
         self.uses_bos = self.bos_index is not None
         self.eos_index = saver.kwargs['eos_index']
@@ -394,7 +602,15 @@ class RecognitionModelInterface(ModelInterface):
                 positive_mask=model_input.positive_mask
             )
         )
-        return model(model_input.input_sequence, tag_kwargs=tag_kwargs)
+
+        # For transformers, UnidirectionalTransformerEncoderLayers requires
+        # include_first=False. The logic `not self.uses_bos` correctly sets this,
+        # but the argument can get lost in the composition framework. We pass it
+        # explicitly to the model call to ensure it is propagated correctly.
+        if self.architecture == 'transformer':
+            return model(model_input.input_sequence, include_first=False, tag_kwargs=tag_kwargs)
+        else:
+            return model(model_input.input_sequence, tag_kwargs=tag_kwargs)
 
 
 class OutputHeads(torch.nn.Module):

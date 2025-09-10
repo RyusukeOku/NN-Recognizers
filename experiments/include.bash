@@ -3,16 +3,16 @@ BASE_DIR=data
 FIGURES_DIR=$BASE_DIR/figures
 
 FINITE_AUTOMATON_LANGUAGES=( \
-  even-pairs \
-  repeat-01 \
-  parity \
-  cycle-navigation \
-  modular-arithmetic-simple \
-  dyck-2-3 \
-  first \
+  # even-pairs \
+  # repeat-01 \
+  # parity \
+  # cycle-navigation \
+  # modular-arithmetic-simple \
+  # dyck-2-3 \
+  # first \
 )
 HAND_WRITTEN_LANGUAGES=( \
-  # majority \
+  majority \
   # stack-manipulation \
   # marked-reversal \
   # unmarked-reversal \
@@ -28,7 +28,7 @@ LANGUAGES=( \
   "${FINITE_AUTOMATON_LANGUAGES[@]}" \
   "${HAND_WRITTEN_LANGUAGES[@]}"
 )
-ARCHITECTURES=(transformer rnn lstm)
+ARCHITECTURES=(transformer) #rnn lstm)
 LOSS_TERMS=(rec) #rec+lm rec+ns rec+lm+ns)
 VALIDATION_SETS=(validation-{short,long})
 TRIALS=({1..10})

@@ -84,11 +84,7 @@ python src/recognizers/neural_networks/train.py \
   --output "$model_dir" \
   --training-data "$language_dir" \
   --validation-data "$validation_data" \
-  --architecture 'hybrid_csg' \
-  --hybrid-base-architecture "$architecture" \
-  --embedding-size $(case "$architecture" in transformer) echo 32;; rnn) echo 79;; lstm) echo 40;; esac) \
-  --lba-hidden-size 32 \
-  --lba-n-steps 150 \
+  --architecture "$architecture" \
   "${model_flags[@]}" \
   --init-scale 0.1 \
   "${loss_term_flags[@]}" \
@@ -101,5 +97,8 @@ python src/recognizers/neural_networks/train.py \
   --learning-rate-patience 5 \
   --learning-rate-decay-factor 0.5 \
   --examples-per-checkpoint 10000 \
-  "${progress_args[@]}"
-bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir"
+  "${progress_args[@]}" \
+  --use-fsa-features \
+  --fsa-name "$language" \
+  --fsa-embedding-dim 8
+bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir" --use-fsa-features -fsa-name "$language" --fsa-embedding-dim 8
