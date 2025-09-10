@@ -205,15 +205,45 @@ class RecognitionModelInterface(ModelInterface):
             if args.fsa_embedding_dim is None:
                 raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
 
-            # Convert kebab-case fsa_name from command line to snake_case for function lookup
-            fsa_name_snake_case = args.fsa_name.replace('-', '_')
-            fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
+            from recognizers.hand_picked_languages import (
+                cycle_navigation, dyck_k_m, even_pairs, first,
+                modular_arithmetic_simple, parity, repeat_01
+            )
 
-            if not hasattr(structural_fsas, fsa_func_name):
-                raise ValueError(f"Unknown FSA name: {args.fsa_name}")
-            
-            fsa_func = getattr(structural_fsas, fsa_func_name)
-            fsa_container, fsa_alphabet = fsa_func()
+            fsa_name = args.fsa_name
+            fsa_func = None
+            fsa_args = {}
+
+            hand_picked_map = {
+                "cycle-navigation": cycle_navigation.cycle_navigation_dfa,
+                "even-pairs": even_pairs.even_pairs_dfa,
+                "first": first.first_dfa,
+                "modular-arithmetic-simple": modular_arithmetic_simple.modular_arithmetic_simple_dfa,
+                "parity": parity.parity_dfa,
+                "repeat-01": repeat_01.repeat_01_dfa,
+            }
+
+            if fsa_name in hand_picked_map:
+                fsa_func = hand_picked_map[fsa_name]
+            elif fsa_name.startswith("dyck-"):
+                try:
+                    _, k, m = fsa_name.split('-')
+                    k, m = int(k), int(m)
+                    fsa_func = dyck_k_m.dyck_k_m_dfa
+                    fsa_args = {'k': k, 'm': m}
+                except (ValueError, IndexError):
+                    raise ValueError(f"Invalid format for dyck FSA name: '{fsa_name}'. Expected 'dyck-k-m'.")
+            else:
+                # Fallback to original structural FSAs
+                fsa_name_snake_case = fsa_name.replace('-', '_')
+                fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
+                if hasattr(structural_fsas, fsa_func_name):
+                    fsa_func = getattr(structural_fsas, fsa_func_name)
+
+            if fsa_func is None:
+                raise ValueError(f"Unknown or unsupported FSA name: {fsa_name}")
+
+            fsa_container, fsa_alphabet = fsa_func(**fsa_args)
 
             kwargs['fsa_name'] = args.fsa_name
             kwargs['fsa_container'] = fsa_container
