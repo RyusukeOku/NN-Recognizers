@@ -86,7 +86,8 @@ def build_pta(positive_samples: list[list[str]]) -> FSA:
                 fsa.add_arc(current_state, symbol, next_state)
             
             current_state = next_state
-        fsa.add_F(current_state)
+        # Add final state with the semiring's multiplicative identity (weight 1)
+        fsa.add_F(current_state, fsa.R.one)
         
     return fsa
 
@@ -108,7 +109,8 @@ def accepts(fsa: FSA, sample: list[str]) -> bool:
         if not current_states:
             return False
     
-    return not current_states.isdisjoint(set(fsa.F))
+    # A string is accepted if any of the current states are in the set of final states.
+    return not current_states.isdisjoint(fsa.F.keys())
 
 
 def merge_states(fsa: FSA, q_from: State, q_to: State) -> FSA:
@@ -121,18 +123,22 @@ def merge_states(fsa: FSA, q_from: State, q_to: State) -> FSA:
     # Create new states, mapping q_from to q_to
     for q in fsa.Q:
         if q != q_from:
-            new_q = new_fsa.add_state()
+            # Create a new State object with the same index from the old FSA
+            new_q = State(q.idx)
+            new_fsa.add_state(new_q)
             state_map[q] = new_q
     
+    # The new state corresponding to the merge target q_to
     q_to_new = state_map[q_to]
 
     # Remap arcs
     for p in fsa.Q:
         for symbol, r in fsa.arcs(p):
+            # Map source and destination states to the new FSA's states
             p_new = q_to_new if p == q_from else state_map[p]
             r_new = q_to_new if r == q_from else state_map[r]
             
-            # Avoid adding duplicate arcs
+            # Avoid adding duplicate arcs that might result from the merge
             is_duplicate = False
             for s_existing, r_existing in new_fsa.arcs(p_new):
                 if s_existing == symbol and r_existing == r_new:
@@ -146,10 +152,12 @@ def merge_states(fsa: FSA, q_from: State, q_to: State) -> FSA:
         i_new = q_to_new if i_state == q_from else state_map[i_state]
         new_fsa.set_I(i_new)
 
-    for f_state in fsa.F:
+    # Iterate over final states and their weights
+    for f_state, f_weight in fsa.F.items():
         f_new = q_to_new if f_state == q_from else state_map[f_state]
+        # If the new final state is not already final, add it with the original weight.
         if f_new not in new_fsa.F:
-            new_fsa.add_F(f_new)
+            new_fsa.add_F(f_new, f_weight)
             
     return new_fsa
 
@@ -202,7 +210,7 @@ def to_dict_container(fsa: FSA, alphabet: list[str]) -> dict:
 
     num_states = len(state_map)
     initial_state = state_map[next(iter(fsa.I))]
-    final_states = [state_map[s] for s in fsa.F]
+    final_states = [state_map[s] for s in fsa.F.keys()]
     
     transitions = []
     for p in fsa.Q:
