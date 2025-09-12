@@ -74,7 +74,7 @@ def build_pta(positive_samples: list[list[str]]) -> FSA:
         for token in sample:
             symbol = Sym(token)
             next_state = None
-            for s, q in fsa.arcs(current_state):
+            for s, q, _ in fsa.arcs(current_state):
                 if s == symbol:
                     next_state = q
                     break
@@ -83,7 +83,7 @@ def build_pta(positive_samples: list[list[str]]) -> FSA:
                 next_state = State(state_counter)
                 fsa.add_state(next_state)
                 state_counter += 1
-                fsa.add_arc(current_state, symbol, next_state)
+                fsa.add_arc(current_state, symbol, next_state, fsa.R.one)
             
             current_state = next_state
         # Add final state with the semiring's multiplicative identity (weight 1)
@@ -102,7 +102,7 @@ def accepts(fsa: FSA, sample: list[str]) -> bool:
         symbol = Sym(token)
         next_states = set()
         for state in current_states:
-            for s, q in fsa.arcs(state):
+            for s, q, _ in fsa.arcs(state):
                 if s == symbol:
                     next_states.add(q)
         current_states = next_states
@@ -133,19 +133,19 @@ def merge_states(fsa: FSA, q_from: State, q_to: State) -> FSA:
 
     # Remap arcs
     for p in fsa.Q:
-        for symbol, r in fsa.arcs(p):
+        for symbol, r, weight in fsa.arcs(p):
             # Map source and destination states to the new FSA's states
             p_new = q_to_new if p == q_from else state_map[p]
             r_new = q_to_new if r == q_from else state_map[r]
             
             # Avoid adding duplicate arcs that might result from the merge
             is_duplicate = False
-            for s_existing, r_existing in new_fsa.arcs(p_new):
+            for s_existing, r_existing, _ in new_fsa.arcs(p_new):
                 if s_existing == symbol and r_existing == r_new:
                     is_duplicate = True
                     break
             if not is_duplicate:
-                new_fsa.add_arc(p_new, symbol, r_new)
+                new_fsa.add_arc(p_new, symbol, r_new, weight)
 
     # Remap initial and final states
     for i_state in fsa.I:
@@ -214,7 +214,7 @@ def to_dict_container(fsa: FSA, alphabet: list[str]) -> dict:
     
     transitions = []
     for p in fsa.Q:
-        for symbol, q in fsa.arcs(p):
+        for symbol, q, _ in fsa.arcs(p):
             p_id = state_map[p]
             q_id = state_map[q]
             symbol_id = symbol_map[symbol.val]
