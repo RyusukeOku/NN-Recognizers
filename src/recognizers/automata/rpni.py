@@ -63,7 +63,10 @@ def build_pta(positive_samples: list[list[str]]) -> FSA:
         An FSA object representing the PTA.
     """
     fsa = FSA()
-    start_state = fsa.add_state()
+    state_counter = 0
+    start_state = State(state_counter)
+    fsa.add_state(start_state)
+    state_counter += 1
     fsa.set_I(start_state)
 
     for sample in positive_samples:
@@ -77,7 +80,9 @@ def build_pta(positive_samples: list[list[str]]) -> FSA:
                     break
             
             if next_state is None:
-                next_state = fsa.add_state()
+                next_state = State(state_counter)
+                fsa.add_state(next_state)
+                state_counter += 1
                 fsa.add_arc(current_state, symbol, next_state)
             
             current_state = next_state
