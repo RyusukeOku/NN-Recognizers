@@ -99,6 +99,7 @@ def main():
     model_interface.add_arguments(parser)
     model_interface.add_forward_arguments(parser)
     args = parser.parse_args()
+    model_interface.set_attributes_from_args(args)
 
     fsa_container = None
     fsa_alphabet = None
