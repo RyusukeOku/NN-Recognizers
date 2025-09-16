@@ -5,7 +5,7 @@ from recognizers.automata.RPNI import run_RPNI
 from recognizers.automata.finite_automaton import FiniteAutomatonContainer, FiniteAutomatonTransition
 from rayuela.base.state import State
 from rau.vocab import Vocabulary
-from aalpy.automata import Dfa
+from Dfa import Dfa
 
 
 class RPNILearner:

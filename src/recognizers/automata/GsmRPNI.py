@@ -1,7 +1,7 @@
 import time
 from collections import deque
 
-from aalpy.learning_algs.deterministic_passive.rpni_helper_functions import to_automaton, RpniNode, createPTA
+from rpni_helper_functions import to_automaton, RpniNode, createPTA
 
 
 class GsmRPNI:
