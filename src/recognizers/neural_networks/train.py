@@ -65,10 +65,14 @@ def main():
     if args.learn_fsa_with_rpni:
         console_logger.info('Learning FSA with RPNI...')
         from recognizers.automata.rpni_learner import RPNILearner
-        from rau.vocab import Vocabulary
+        from rau.vocab import ToIntVocabularyBuilder
 
-        # We need the vocabulary object for RPNILearner
-        vocab = Vocabulary.from_params(vocabulary_data['tokens'], vocabulary_data['allow_unk'])
+        # Create the vocabulary object needed for RPNI learner
+        # This replicates the logic from load_prepared_data -> get_vocabularies
+        vocab, _ = model_interface.get_vocabularies(
+            vocabulary_data,
+            builder=ToIntVocabularyBuilder()
+        )
         fsa_alphabet = vocabulary_data['tokens']
 
         # RPNILearner needs paths to main.tok and labels.txt
