@@ -204,10 +204,13 @@ class RecognitionModelInterface(ModelInterface):
             lba_n_steps=getattr(args, 'lba_n_steps', 50)
         )
 
-        kwargs['use_fsa_features'] = args.use_fsa_features
-        if args.use_fsa_features:
+        kwargs['use_fsa_features'] = getattr(args, 'use_fsa_features', False)
+        if kwargs['use_fsa_features']:
+            kwargs['word_vocab'] = input_vocab
+            kwargs['fsa_embedding_dim'] = getattr(args, 'fsa_embedding_dim', None)
+
             if getattr(args, 'fsa_name', None) is not None:
-                if getattr(args, 'fsa_embedding_dim', None) is None:
+                if kwargs['fsa_embedding_dim'] is None:
                     raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features and --fsa-name')
 
                 from recognizers.hand_picked_languages import (
@@ -239,7 +242,6 @@ class RecognitionModelInterface(ModelInterface):
                     except (ValueError, IndexError):
                         raise ValueError(f"Invalid format for dyck FSA name: '{fsa_name}'. Expected 'dyck-k-m'.")
                 else:
-                    # Fallback to original structural FSAs
                     fsa_name_snake_case = fsa_name.replace('-', '_')
                     fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
                     if hasattr(structural_fsas, fsa_func_name):
@@ -253,10 +255,6 @@ class RecognitionModelInterface(ModelInterface):
                 kwargs['fsa_name'] = args.fsa_name
                 kwargs['fsa_container'] = fsa_container
                 kwargs['fsa_alphabet'] = fsa_alphabet
-                kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
-                kwargs['word_vocab'] = input_vocab
-            elif getattr(args, 'fsa_embedding_dim', None) is not None:
-                kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
 
         return kwargs
 
