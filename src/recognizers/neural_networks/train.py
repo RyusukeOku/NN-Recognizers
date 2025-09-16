@@ -73,7 +73,7 @@ def main():
             vocabulary_data,
             builder=ToIntVocabularyBuilder()
         )
-        fsa_alphabet = vocabulary_data['tokens']
+        fsa_alphabet = vocabulary_data.tokens
 
         # RPNILearner needs paths to main.tok and labels.txt
         main_tok_path = args.training_data / 'main.tok'
