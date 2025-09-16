@@ -99,6 +99,22 @@ def main():
     model_interface.add_arguments(parser)
     model_interface.add_forward_arguments(parser)
     args = parser.parse_args()
+
+    # Load saved model arguments and merge with command-line arguments
+    # This is necessary so that set_attributes_from_args gets the correct architecture info
+    if getattr(args, 'load_model', None):
+        kwargs_path = args.load_model / 'kwargs.json'
+        if not kwargs_path.is_file():
+            raise FileNotFoundError(f"Cannot find kwargs.json in {args.load_model}")
+        with open(kwargs_path, 'r') as f:
+            loaded_kwargs = json.load(f)
+        
+        temp_args = argparse.Namespace(**loaded_kwargs)
+        for key, value in vars(args).items():
+            if value is not None:
+                setattr(temp_args, key, value)
+        args = temp_args
+
     model_interface.set_attributes_from_args(args)
 
     fsa_container = None
