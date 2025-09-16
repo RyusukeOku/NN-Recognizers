@@ -1,7 +1,7 @@
 from typing import Generic, Dict
 
-from aalpy.base import AutomatonState, DeterministicAutomaton
-from aalpy.base.Automaton import InputType
+from src.recognizers.automata.automaton_aalpy import AutomatonState, DeterministicAutomaton
+from src.recognizers.automata.automaton_aalpy import InputType
 
 
 class DfaState(AutomatonState, Generic[InputType]):

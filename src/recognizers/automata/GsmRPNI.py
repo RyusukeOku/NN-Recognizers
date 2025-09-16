@@ -1,7 +1,7 @@
 import time
 from collections import deque
 
-from rpni_helper_functions import to_automaton, RpniNode, createPTA
+from src.recognizers.automata.rpni_helper_functions import to_automaton, RpniNode, createPTA
 
 
 class GsmRPNI:

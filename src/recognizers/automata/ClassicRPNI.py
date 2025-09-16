@@ -1,6 +1,6 @@
 import time
 from bisect import insort
-from rpni_helper_functions import to_automaton, createPTA, \
+from src.recognizers.automata.rpni_helper_functions import to_automaton, createPTA, \
     check_sequence, extract_unique_sequences
 
 
