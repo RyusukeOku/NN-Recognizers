@@ -103,7 +103,7 @@ def main():
     # Load saved model arguments and merge with command-line arguments
     # This is necessary so that set_attributes_from_args gets the correct architecture info
     if getattr(args, 'load_model', None):
-        kwargs_path = args.load_model / 'kwargs.json'
+        kwargs_path = pathlib.Path(args.load_model) / 'kwargs.json'
         if not kwargs_path.is_file():
             raise FileNotFoundError(f"Cannot find kwargs.json in {args.load_model}")
         with open(kwargs_path, 'r') as f:
