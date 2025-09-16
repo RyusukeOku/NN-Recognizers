@@ -159,8 +159,14 @@ class RecognitionModelInterface(ModelInterface):
             help='Use FSA state features in the input layer.')
         group.add_argument('--fsa-name', type=str,
             help='Name of the structural FSA to use (when --use-fsa-features is enabled).')
-        group.add_argument('--fsa-embedding-dim', type=int,
-            help='Dimension of the FSA state embeddings (when --use-fsa-features is enabled).')
+        group.add_argument('--fsa-embedding-dim', type=int, default=16,
+                           help='The dimension of the FSA state embeddings.')
+        group.add_argument('--use-fst-annotator', action='store_true', default=False,
+            help='Use an FST to annotate the input sequence.')
+        group.add_argument('--fst-annotator-path', type=Path,
+            help='Path to the FST annotator data file.')
+        group.add_argument('--use-structural-fsa-from-automaton', type=str, default=None,
+            help='Use a structural FSA from a hand-coded automaton name.')
 
 
     def get_kwargs(self, args, vocabulary_data):
@@ -253,7 +259,7 @@ class RecognitionModelInterface(ModelInterface):
 
         return kwargs
 
-    def construct_saver(self, args, vocabulary_data=None):
+    def construct_saver(self, args, vocabulary_data=None, fsa_container=None, fsa_alphabet=None):
         device = self.get_device(args)
 
         if self.use_load and getattr(args, 'load_model', None) is not None:
@@ -303,6 +309,18 @@ class RecognitionModelInterface(ModelInterface):
             # --- TRAINING PATH ---
             if self.use_init:
                 kwargs = self.get_kwargs(args, vocabulary_data)
+                if fsa_container is not None:
+                    kwargs['fsa_container'] = fsa_container
+                    kwargs['fsa_alphabet'] = fsa_alphabet
+                    kwargs['use_fsa_features'] = True
+                    uses_bos = kwargs['architecture'] == 'transformer'
+                    uses_output_vocab = kwargs['use_language_modeling_head'] or kwargs['use_next_symbols_head']
+                    input_vocab, _ = get_vocabularies(
+                        vocabulary_data,
+                        use_bos=uses_bos,
+                        use_eos=uses_output_vocab
+                    )
+                    kwargs['word_vocab'] = input_vocab
                 output = args.output
                 # Construct the saver, which also constructs the model
                 saver = construct_saver(self.construct_model, output, **kwargs)

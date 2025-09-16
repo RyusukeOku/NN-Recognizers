@@ -1,259 +1,117 @@
+from typing import Union
 
-import argparse
-import pathlib
-import sys
-from collections import deque
-from itertools import product
-
-import torch
-from rayuela.base.state import State
-from rayuela.base.symbol import Sym
-from rayuela.fsa.fsa import FSA
+from aalpy.base import DeterministicAutomaton
+from aalpy.learning_algs.deterministic_passive.ClassicRPNI import ClassicRPNI
+from aalpy.learning_algs.deterministic_passive.GsmRPNI import GsmRPNI
 
 
-def load_data(language_dir: pathlib.Path) -> tuple[list[list[str]], list[list[str]], list[str]]:
+def run_RPNI(data, automaton_type, algorithm='gsm',
+             input_completeness=None, print_info=True) -> Union[DeterministicAutomaton, None]:
     """
-    Loads positive and negative samples from the specified language directory.
+    Run RPNI, a deterministic passive model learning algorithm.
+    Resulting model conforms to the provided data.
+    For more information on RPNI, check out AALpy' Wiki:
+    https://github.com/DES-Lab/AALpy/wiki/RPNI---Passive-Deterministic-Automata-Learning
 
     Args:
-        language_dir: Path to the directory containing main.tok and labels.txt.
+
+        data: sequence of input sequences and corresponding label. Eg. [[(i1,i2,i3, ...), label], ...]
+        automaton_type: either 'dfa', 'mealy', 'moore'. Note that for 'mealy' machine learning, data has to be prefix-closed.
+        algorithm: either 'gsm' (generalized state merging) or 'classic' for base RPNI implementation. GSM is much faster and less resource intensive.
+        input_completeness: either None, 'sink_state', or 'self_loop'. If None, learned model could be input incomplete,
+        sink_state will lead all undefined inputs form some state to the sink state, whereas self_loop will simply create
+        a self loop. In case of Mealy learning output of the added transition will be 'epsilon'.
+        print_info: print learning progress and runtime information
 
     Returns:
-        A tuple containing:
-        - A list of positive samples (each sample is a list of tokens).
-        - A list of negative samples.
-        - A sorted list of unique symbols (the alphabet).
+
+        Model conforming to the data, or None if data is non-deterministic.
     """
-    strings_path = language_dir / 'main.tok'
-    labels_path = language_dir / 'labels.txt'
+    assert algorithm in {'gsm', 'classic'}
+    assert automaton_type in {'dfa', 'mealy', 'moore'}
+    assert input_completeness in {None, 'self_loop', 'sink_state'}
 
-    if not strings_path.exists() or not labels_path.exists():
-        raise FileNotFoundError(f"Data files not found in {language_dir}")
+    if algorithm == 'classic':
+        rpni = ClassicRPNI(data, automaton_type, print_info)
+    else:
+        rpni = GsmRPNI(data, automaton_type, print_info)
 
-    with strings_path.open() as f_str, labels_path.open() as f_lbl:
-        lines = f_str.readlines()
-        labels = [int(l.strip()) for l in f_lbl.readlines()]
+    if rpni.root_node is None:
+        print('Data provided to RPNI is not deterministic. Ensure that the data is deterministic, '
+              'or consider using Alergia.')
+        return None
 
-    positive_samples = []
-    negative_samples = []
-    alphabet = set()
+    learned_model = rpni.run_rpni()
 
-    for string, label in zip(lines, labels):
-        tokens = string.strip().split()
-        if not tokens:
-            continue
-        
-        alphabet.update(tokens)
-        if label == 1:
-            positive_samples.append(tokens)
+    if not learned_model.is_input_complete():
+        if not input_completeness:
+            if print_info:
+                print('Warning: Learned Model is not input complete (inputs not defined for all states). '
+                      'Consider calling .make_input_complete()')
         else:
-            negative_samples.append(tokens)
-            
-    return positive_samples, negative_samples, sorted(list(alphabet))
+            if print_info:
+                print(f'Learned model was not input complete. Adapting it with {input_completeness} transitions.')
+            learned_model.make_input_complete(input_completeness)
+
+    return learned_model
 
 
-def build_pta(positive_samples: list[list[str]]) -> FSA:
+def run_PAPNI(data, vpa_alphabet, algorithm='edsm', print_info=True):
     """
-    Builds a Prefix Tree Acceptor (PTA) from a set of positive samples.
+    Run PAPNI, a deterministic passive model learning algorithm of deterministic pushdown automata.
+    Resulting model conforms to the provided data.
 
     Args:
-        positive_samples: A list of positive samples.
+
+        data: sequence of input sequences and corresponding label. Eg. [[(i1,i2,i3, ...), label], ...]
+        vpa_alphabet:  grouping of alphabet elements to call symbols, return symbols, and internal symbols. Call symbols
+        push to stack, return symbols pop from stack, and internal symbols do not affect the stack.
+        algorithm: either 'gsm' for classic RPNI or 'edsm' for evidence driven state merging variant of RPNI
+        GSM is much faster and less resource intensive.
+        print_info: print learning progress and runtime information
 
     Returns:
-        An FSA object representing the PTA.
+
+        VPA conforming to the data, or None if data is non-deterministic.
     """
-    fsa = FSA()
-    state_counter = 0
-    start_state = State(state_counter)
-    fsa.add_state(start_state)
-    state_counter += 1
-    fsa.set_I(start_state)
+    from aalpy.utils import is_balanced
+    from aalpy.automata.Vpa import vpa_from_dfa_representation
+    from aalpy.learning_algs import run_EDSM
 
-    for sample in positive_samples:
-        current_state = start_state
-        for token in sample:
-            symbol = Sym(token)
-            next_state = None
-            for s, q, _ in fsa.arcs(current_state):
-                if s == symbol:
-                    next_state = q
-                    break
-            
-            if next_state is None:
-                next_state = State(state_counter)
-                fsa.add_state(next_state)
-                state_counter += 1
-                fsa.add_arc(current_state, symbol, next_state, fsa.R.one)
-            
-            current_state = next_state
-        # Add final state with the semiring's multiplicative identity (weight 1)
-        fsa.add_F(current_state, fsa.R.one)
-        
-    return fsa
+    assert algorithm in {'gsm', 'classic', 'edsm'}
 
+    # preprocess input sequences to keep track of stack
+    papni_data = []
+    for input_seq, label in data:
+        # if input sequance is not balanced we do not consider it (it would lead to error state anyway)
+        if not is_balanced(input_seq, vpa_alphabet):
+            continue
 
-def accepts(fsa: FSA, sample: list[str]) -> bool:
-    """
-    Checks if the given FSA accepts a sample string.
-    Handles non-determinism by tracking a set of current states.
-    """
-    current_states = set(fsa.I)
-    for token in sample:
-        symbol = Sym(token)
-        next_states = set()
-        for state in current_states:
-            for s, q, _ in fsa.arcs(state):
-                if s == symbol:
-                    next_states.add(q)
-        current_states = next_states
-        if not current_states:
-            return False
-    
-    # A string is accepted if any of the current states are in the set of final states.
-    return not current_states.isdisjoint(fsa.F.keys())
+        # for each sequance keep track of the stack, and when pop/return element is observed encode it along with the
+        # current top of stack. This keeps track of stack during execution
+        processed_sequance = []
+        stack = []
 
+        for input_symbol in input_seq:
+            input_element = input_symbol
+            # if call/push symbol push to stack
+            if input_symbol in vpa_alphabet.call_alphabet:
+                stack.append(input_symbol)
+            # if return/pop symbol pop from stack and add it to the input data
+            if input_symbol in vpa_alphabet.return_alphabet:
+                top_of_stack = stack.pop()
+                input_element = (input_symbol, top_of_stack)
+            processed_sequance.append(input_element)
 
-def merge_states(fsa: FSA, q_from: State, q_to: State) -> FSA:
-    """
-    Merges state q_from into q_to in a new FSA.
-    """
-    new_fsa = FSA()
-    state_map = {}
+        papni_data.append((processed_sequance, label))
 
-    # Create new states, mapping q_from to q_to
-    for q in fsa.Q:
-        if q != q_from:
-            # Create a new State object with the same index from the old FSA
-            new_q = State(q.idx)
-            new_fsa.add_state(new_q)
-            state_map[q] = new_q
-    
-    # The new state corresponding to the merge target q_to
-    q_to_new = state_map[q_to]
+    # instantiate and run PAPNI as base RPNI with stack-aware data
+    if algorithm != 'edsm':
+        learned_model = run_RPNI(papni_data, automaton_type='dfa', algorithm=algorithm, print_info=print_info)
+    else:
+        learned_model = run_EDSM(papni_data, automaton_type='dfa', print_info=print_info)
 
-    # Remap arcs
-    for p in fsa.Q:
-        for symbol, r, weight in fsa.arcs(p):
-            # Map source and destination states to the new FSA's states
-            p_new = q_to_new if p == q_from else state_map[p]
-            r_new = q_to_new if r == q_from else state_map[r]
-            
-            # Avoid adding duplicate arcs that might result from the merge
-            is_duplicate = False
-            for s_existing, r_existing, _ in new_fsa.arcs(p_new):
-                if s_existing == symbol and r_existing == r_new:
-                    is_duplicate = True
-                    break
-            if not is_duplicate:
-                new_fsa.add_arc(p_new, symbol, r_new, weight)
+    # convert intermediate DFA representation to VPA
+    learned_model = vpa_from_dfa_representation(learned_model, vpa_alphabet)
 
-    # Remap initial and final states
-    for i_state in fsa.I:
-        i_new = q_to_new if i_state == q_from else state_map[i_state]
-        new_fsa.set_I(i_new)
-
-    # Iterate over final states and their weights
-    for f_state, f_weight in fsa.F.items():
-        f_new = q_to_new if f_state == q_from else state_map[f_state]
-        # If the new final state is not already final, add it with the original weight.
-        if f_new not in new_fsa.F:
-            new_fsa.add_F(f_new, f_weight)
-            
-    return new_fsa
-
-
-def rpni(positive_samples: list[list[str]], negative_samples: list[list[str]]) -> FSA:
-    """
-    Performs the RPNI algorithm to infer an FSA.
-    """
-    fsa = build_pta(positive_samples)
-    
-    # States need to be ordered for the merging loop
-    ordered_states = sorted(list(fsa.Q), key=lambda s: s.idx)
-    
-    while True:
-        merged_in_iteration = False
-        for i in range(len(ordered_states)):
-            for j in range(i):
-                q_i = ordered_states[i]
-                q_j = ordered_states[j]
-
-                # Try merging q_i into q_j
-                merged_fsa = merge_states(fsa, q_i, q_j)
-                
-                is_consistent = True
-                for neg_sample in negative_samples:
-                    if accepts(merged_fsa, neg_sample):
-                        is_consistent = False
-                        break
-                
-                if is_consistent:
-                    fsa = merged_fsa
-                    ordered_states = sorted(list(fsa.Q), key=lambda s: s.idx)
-                    merged_in_iteration = True
-                    break  # Restart the loop with the new FSA
-            if merged_in_iteration:
-                break
-        
-        if not merged_in_iteration:
-            break # No more valid merges found
-
-    return fsa
-
-
-def to_dict_container(fsa: FSA, alphabet: list[str]) -> dict:
-    """
-    Converts a Rayuela FSA to a dictionary format compatible with FSA_integrated_input_layer.
-    """
-    state_map = {state: i for i, state in enumerate(sorted(list(fsa.Q), key=lambda s: s.idx))}
-    symbol_map = {symbol: i for i, symbol in enumerate(alphabet)}
-
-    num_states = len(state_map)
-    initial_state = state_map[next(iter(fsa.I))]
-    final_states = [state_map[s] for s in fsa.F.keys()]
-    
-    transitions = []
-    for p in fsa.Q:
-        for symbol, q, _ in fsa.arcs(p):
-            p_id = state_map[p]
-            q_id = state_map[q]
-            symbol_id = symbol_map[symbol.val]
-            transitions.append((p_id, symbol_id, q_id))
-
-    return {
-        'num_states': num_states,
-        'initial_state': initial_state,
-        'final_states': final_states,
-        'transitions': transitions,
-        'alphabet': alphabet
-    }
-
-
-def main():
-    parser = argparse.ArgumentParser(description='Infer an FSA from examples using RPNI.')
-    parser.add_argument('--language-dir', type=pathlib.Path, required=True,
-                        help='Directory with language data (main.tok, labels.txt).')
-    parser.add_argument('--output-path', type=pathlib.Path, required=True,
-                        help='Path to save the inferred FSA data.')
-    args = parser.parse_args()
-
-    print(f"Loading data from: {args.language_dir}", file=sys.stderr)
-    pos_samples, neg_samples, alphabet = load_data(args.language_dir)
-    print(f"Found {len(pos_samples)} positive, {len(neg_samples)} negative samples.", file=sys.stderr)
-    print(f"Alphabet size: {len(alphabet)}", file=sys.stderr)
-
-    print("Running RPNI algorithm...", file=sys.stderr)
-    inferred_fsa = rpni(pos_samples, neg_samples)
-    print("RPNI finished.", file=sys.stderr)
-
-    print("Converting FSA to container format...", file=sys.stderr)
-    fsa_container = to_dict_container(inferred_fsa, alphabet)
-
-    args.output_path.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Saving inferred FSA to: {args.output_path}", file=sys.stderr)
-    torch.save(fsa_container, args.output_path)
-    print("Done.", file=sys.stderr)
-
-
-if __name__ == '__main__':
-    main()
+    return learned_model
