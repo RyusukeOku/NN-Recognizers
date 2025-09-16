@@ -126,7 +126,9 @@ def extract_unique_sequences(root_node):
 
 
 def to_automaton(red, automaton_type):
-    from src.recognizers.automata import DfaState, Dfa, MooreMachine, MooreState, MealyMachine, MealyState
+    from src.recognizers.automata.Dfa import DfaState, Dfa
+    from src.recognizers.automata.MooreMachine import MooreMachine, MooreState
+    from src.recognizers.automata.MealyMachine import MealyMachine, MealyState
 
     if automaton_type == 'dfa':
         state, automaton = DfaState, Dfa
