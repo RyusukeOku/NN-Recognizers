@@ -113,9 +113,9 @@ class RPNILearner:
                 target_state_id = state_map[target_aalpy_state]
 
                 transition = FiniteAutomatonTransition(
-                    state_from=State(state_id),
+                    state_from=state_id,
                     symbol=symbol_id,
-                    state_to=State(target_state_id)
+                    state_to=target_state_id
                 )
                 container.add_transition(transition)
 
