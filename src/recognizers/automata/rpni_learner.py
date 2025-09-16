@@ -96,7 +96,7 @@ class RPNILearner:
         container = FiniteAutomatonContainer(
             num_states=len(aalpy_states),
             alphabet_size=len(self.vocab),
-            initial_state=State(initial_state_id)
+            initial_state=initial_state_id
         )
 
         for aalpy_state, state_id in state_map.items():
