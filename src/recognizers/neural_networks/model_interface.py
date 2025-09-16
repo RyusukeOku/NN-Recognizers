@@ -206,56 +206,57 @@ class RecognitionModelInterface(ModelInterface):
 
         kwargs['use_fsa_features'] = args.use_fsa_features
         if args.use_fsa_features:
-            if args.fsa_name is None:
-                raise ValueError('--fsa-name is required when using --use-fsa-features')
-            if args.fsa_embedding_dim is None:
-                raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
+            if getattr(args, 'fsa_name', None) is not None:
+                if getattr(args, 'fsa_embedding_dim', None) is None:
+                    raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features and --fsa-name')
 
-            from recognizers.hand_picked_languages import (
-                cycle_navigation, dyck_k_m, even_pairs, first,
-                modular_arithmetic_simple, parity, repeat_01
-            )
+                from recognizers.hand_picked_languages import (
+                    cycle_navigation, dyck_k_m, even_pairs, first,
+                    modular_arithmetic_simple, parity, repeat_01
+                )
 
-            fsa_name = args.fsa_name
-            fsa_func = None
-            fsa_args = {}
+                fsa_name = args.fsa_name
+                fsa_func = None
+                fsa_args = {}
 
-            hand_picked_map = {
-                "cycle-navigation": cycle_navigation.cycle_navigation_dfa,
-                "even-pairs": even_pairs.even_pairs_dfa,
-                "first": first.first_dfa,
-                "modular-arithmetic-simple": modular_arithmetic_simple.modular_arithmetic_simple_dfa,
-                "parity": parity.parity_dfa,
-                "repeat-01": repeat_01.repeat_01_dfa,
-            }
+                hand_picked_map = {
+                    "cycle-navigation": cycle_navigation.cycle_navigation_dfa,
+                    "even-pairs": even_pairs.even_pairs_dfa,
+                    "first": first.first_dfa,
+                    "modular-arithmetic-simple": modular_arithmetic_simple.modular_arithmetic_simple_dfa,
+                    "parity": parity.parity_dfa,
+                    "repeat-01": repeat_01.repeat_01_dfa,
+                }
 
-            if fsa_name in hand_picked_map:
-                fsa_func = hand_picked_map[fsa_name]
-            elif fsa_name.startswith("dyck-"):
-                try:
-                    _, k, m = fsa_name.split('-')
-                    k, m = int(k), int(m)
-                    fsa_func = dyck_k_m.dyck_k_m_dfa
-                    fsa_args = {'k': k, 'm': m}
-                except (ValueError, IndexError):
-                    raise ValueError(f"Invalid format for dyck FSA name: '{fsa_name}'. Expected 'dyck-k-m'.")
-            else:
-                # Fallback to original structural FSAs
-                fsa_name_snake_case = fsa_name.replace('-', '_')
-                fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
-                if hasattr(structural_fsas, fsa_func_name):
-                    fsa_func = getattr(structural_fsas, fsa_func_name)
+                if fsa_name in hand_picked_map:
+                    fsa_func = hand_picked_map[fsa_name]
+                elif fsa_name.startswith("dyck-"):
+                    try:
+                        _, k, m = fsa_name.split('-')
+                        k, m = int(k), int(m)
+                        fsa_func = dyck_k_m.dyck_k_m_dfa
+                        fsa_args = {'k': k, 'm': m}
+                    except (ValueError, IndexError):
+                        raise ValueError(f"Invalid format for dyck FSA name: '{fsa_name}'. Expected 'dyck-k-m'.")
+                else:
+                    # Fallback to original structural FSAs
+                    fsa_name_snake_case = fsa_name.replace('-', '_')
+                    fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
+                    if hasattr(structural_fsas, fsa_func_name):
+                        fsa_func = getattr(structural_fsas, fsa_func_name)
 
-            if fsa_func is None:
-                raise ValueError(f"Unknown or unsupported FSA name: {fsa_name}")
+                if fsa_func is None:
+                    raise ValueError(f"Unknown or unsupported FSA name: {fsa_name}")
 
-            fsa_container, fsa_alphabet = fsa_func(**fsa_args)
+                fsa_container, fsa_alphabet = fsa_func(**fsa_args)
 
-            kwargs['fsa_name'] = args.fsa_name
-            kwargs['fsa_container'] = fsa_container
-            kwargs['fsa_alphabet'] = fsa_alphabet
-            kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
-            kwargs['word_vocab'] = input_vocab
+                kwargs['fsa_name'] = args.fsa_name
+                kwargs['fsa_container'] = fsa_container
+                kwargs['fsa_alphabet'] = fsa_alphabet
+                kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
+                kwargs['word_vocab'] = input_vocab
+            elif getattr(args, 'fsa_embedding_dim', None) is not None:
+                kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
 
         return kwargs
 
@@ -288,6 +289,18 @@ class RecognitionModelInterface(ModelInterface):
             # This wrapper ignores the kwargs passed by read_saver (from kwargs.json)
             # and uses our fully reconstructed kwargs instead.
             def model_constructor_wrapper(**ignored_kwargs):
+                if fsa_container is not None:
+                    full_kwargs_for_construction['fsa_container'] = fsa_container
+                    full_kwargs_for_construction['fsa_alphabet'] = fsa_alphabet
+                    full_kwargs_for_construction['use_fsa_features'] = True
+                    uses_bos = full_kwargs_for_construction['architecture'] == 'transformer'
+                    uses_output_vocab = full_kwargs_for_construction['use_language_modeling_head'] or full_kwargs_for_construction['use_next_symbols_head']
+                    input_vocab, _ = get_vocabularies(
+                        vocabulary_data,
+                        use_bos=uses_bos,
+                        use_eos=uses_output_vocab
+                    )
+                    full_kwargs_for_construction['word_vocab'] = input_vocab
                 return self.construct_model(**full_kwargs_for_construction)
 
             # read_saver will use our wrapper to build the model shell,
