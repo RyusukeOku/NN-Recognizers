@@ -126,7 +126,7 @@ def extract_unique_sequences(root_node):
 
 
 def to_automaton(red, automaton_type):
-    from aalpy.automata import DfaState, Dfa, MooreMachine, MooreState, MealyMachine, MealyState
+    from src.recognizers.automata import DfaState, Dfa, MooreMachine, MooreState, MealyMachine, MealyState
 
     if automaton_type == 'dfa':
         state, automaton = DfaState, Dfa
