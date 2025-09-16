@@ -313,6 +313,7 @@ class RecognitionModelInterface(ModelInterface):
                     kwargs['fsa_container'] = fsa_container
                     kwargs['fsa_alphabet'] = fsa_alphabet
                     kwargs['use_fsa_features'] = True
+                    kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
                     uses_bos = kwargs['architecture'] == 'transformer'
                     uses_output_vocab = kwargs['use_language_modeling_head'] or kwargs['use_next_symbols_head']
                     input_vocab, _ = get_vocabularies(
