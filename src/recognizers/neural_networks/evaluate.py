@@ -109,11 +109,11 @@ def main():
         with open(kwargs_path, 'r') as f:
             loaded_kwargs = json.load(f)
         
-        temp_args = argparse.Namespace(**loaded_kwargs)
-        for key, value in vars(args).items():
-            if value is not None:
-                setattr(temp_args, key, value)
-        args = temp_args
+        # Merge command-line arguments into the loaded arguments.
+        # Command-line arguments take precedence.
+        cmd_line_args = {k: v for k, v in vars(args).items() if v is not None}
+        loaded_kwargs.update(cmd_line_args)
+        args = argparse.Namespace(**loaded_kwargs)
 
     model_interface.set_attributes_from_args(args)
 
