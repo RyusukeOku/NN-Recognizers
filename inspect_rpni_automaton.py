@@ -15,14 +15,11 @@ def load_vocab(vocab_path: pathlib.Path) -> tuple[Vocabulary, list[str]]:
     tokens = vocab_data['tokens']
     allow_unk = vocab_data['allow_unk']
     
-    # For inspection purposes, we don't need special BOS/EOS handling
     builder = ToIntVocabularyBuilder()
     vocab = build_softmax_vocab(
         tokens,
         allow_unk,
-        builder,
-        use_bos=False,
-        use_eos=False
+        builder
     )
     return vocab, tokens
 
@@ -30,6 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description='Learn and inspect an automaton from data using RPNI.')
     parser.add_argument('--data-dir', type=pathlib.Path, required=True, help='Directory with main.tok and labels.txt')
     parser.add_argument('--vocab-path', type=pathlib.Path, required=True, help='Path to the main.vocab file.')
+    parser.add_argument('--output-dir', type=pathlib.Path, help='Directory to save the automaton description file.')
     args = parser.parse_args()
 
     main_tok_path = args.data_dir / 'main.tok'
@@ -49,24 +47,41 @@ def main():
     print(f"Learning automaton from {args.data_dir} with RPNI...")
     rpni_learner = RPNILearner.from_files(main_tok_path, labels_txt_path, vocab)
     container = rpni_learner.learn()
-    print("--- RPNI Learned Automaton ---")
+    
+    # --- Format output string ---
+    output_lines = []
+    output_lines.append("--- RPNI Learned Automaton ---")
     
     num_states = container.num_states()
-    print(f"Number of States: {num_states}")
+    output_lines.append(f"Number of States: {num_states}")
     
     initial_state = container.initial_state()
-    print(f"Initial State: {initial_state}")
+    output_lines.append(f"Initial State: {initial_state}")
 
     final_states = [i for i in range(num_states) if container.is_accept_state(State(i))]
-    print(f"Final States: {final_states}")
+    output_lines.append(f"Final States: {final_states}")
 
-    print("Transitions:")
-    # Sort transitions for consistent and readable output
+    output_lines.append("Transitions:")
     sorted_transitions = sorted(list(container.transitions()), key=lambda t: (t.state_from, t.symbol))
     for t in sorted_transitions:
-        # Map symbol ID back to string representation
         symbol_str = token_list[t.symbol]
-        print(f"  ({t.state_from}) --'{symbol_str}'--> ({t.state_to})")
+        output_lines.append(f"  ({t.state_from}) --'{symbol_str}'--> ({t.state_to})")
+    
+    output_string = "\n".join(output_lines)
+
+    # --- Print to console ---
+    print(output_string)
+
+    # --- Write to file if output_dir is specified ---
+    if args.output_dir:
+        language_name = args.data_dir.name
+        output_path = args.output_dir / f"{language_name}.txt"
+        
+        print(f"\nWriting automaton to {output_path}...")
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        with open(output_path, 'w') as f:
+            f.write(output_string)
+        print("Done.")
 
 if __name__ == '__main__':
     main()
