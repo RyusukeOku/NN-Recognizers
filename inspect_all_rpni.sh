@@ -11,8 +11,7 @@ fi
 source experiments/include.bash
 
 # Define base paths
-BASE_DATA_DIR="data/training/languages"
-VOCAB_PATH="data/training/main.vocab"
+BASE_DATA_DIR="data/languages"
 OUTPUT_DIR="results/rpni_automaton"
 
 # Ensure the output directory exists
@@ -25,7 +24,8 @@ for lang in "${LANGUAGES[@]}"; do
     echo "----------------------------------------"
     
     DATA_DIR="$BASE_DATA_DIR/$lang"
-    
+    VOCAB_PATH="$DATA_DIR/main.vocab"
+
     # Check if the data directory for the language exists
     if [ ! -d "$DATA_DIR" ]; then
         echo "Warning: Data directory not found for language '$lang' at '$DATA_DIR'. Skipping." >&2
