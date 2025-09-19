@@ -1,9 +1,8 @@
 from typing import Union
 
-from aalpy.base import DeterministicAutomaton
-from aalpy.learning_algs.deterministic_passive.ClassicRPNI import ClassicRPNI
-from aalpy.learning_algs.deterministic_passive.GsmRPNI import GsmRPNI
-
+from src.recognizers.automata.automaton_aalpy import DeterministicAutomaton
+from src.recognizers.automata.ClassicRPNI import ClassicRPNI
+from src.recognizers.automata.GsmRPNI import GsmRPNI
 
 def run_RPNI(data, automaton_type, algorithm='gsm',
              input_completeness=None, print_info=True) -> Union[DeterministicAutomaton, None]:
