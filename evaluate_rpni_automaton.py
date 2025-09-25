@@ -54,9 +54,9 @@ def main():
     for t in automaton.transitions():
         transitions_dict[(t.state_from, t.symbol)] = t.state_to
 
-    # Combine positive and negative samples for evaluation
-    samples = rpni_learner.positive_samples + rpni_learner.negative_samples
-    true_labels = ([True] * len(rpni_learner.positive_samples)) + ([False] * len(rpni_learner.negative_samples))
+    # Combine positive and negative examples for evaluation
+    samples = rpni_learner.positive_examples + rpni_learner.negative_examples
+    true_labels = ([True] * len(rpni_learner.positive_examples)) + ([False] * len(rpni_learner.negative_examples))
 
     correct_predictions = 0
     total_strings = len(samples)
