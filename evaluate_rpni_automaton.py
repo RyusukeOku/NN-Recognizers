@@ -66,7 +66,7 @@ def main():
             tokens = line_tok.strip().split()
             true_label = line_label.strip() == 'True'
             
-            sample_indices = [vocab(token) for token in tokens]
+            sample_indices = [vocab[token] for token in tokens]
 
             current_state = automaton.initial_state
             is_accepted = True
