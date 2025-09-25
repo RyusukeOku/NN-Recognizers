@@ -32,11 +32,10 @@ for lang in "${LANGUAGES[@]}"; do
         continue
     fi
 
-    # Run the inspection and saving script
-    python inspect_rpni_automaton.py \
+    # Run the evaluation script
+    python evaluate_rpni_automaton.py \
         --data-dir "$DATA_DIR" \
-        --vocab-path "$VOCAB_PATH" \
-        --output-dir "$OUTPUT_DIR"
+        --vocab-path "$VOCAB_PATH"
 done
 
 echo "----------------------------------------"
