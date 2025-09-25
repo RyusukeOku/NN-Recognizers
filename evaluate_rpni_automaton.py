@@ -24,18 +24,27 @@ def load_vocab(vocab_path: pathlib.Path) -> tuple[Vocabulary, list[str]]:
     return vocab, tokens
 
 def main():
-    parser = argparse.ArgumentParser(description='Evaluate a learned RPNI automaton.')
-    parser.add_argument('--data-dir', type=pathlib.Path, required=True, help='Directory with main.tok and labels.txt')
-    parser.add_argument('--vocab-path', type=pathlib.Path, required=True, help='Path to the main.vocab file.')
+    parser = argparse.ArgumentParser(description='Evaluate a learned RPNI automaton on a separate dataset.')
+    parser.add_argument('--train-data-dir', type=pathlib.Path, required=True, help='Directory with training data (main.tok and labels.txt)')
+    parser.add_argument('--eval-data-dir', type=pathlib.Path, required=True, help='Directory with evaluation data (main.tok and labels.txt)')
+    parser.add_argument('--vocab-path', type=pathlib.Path, required=True, help='Path to the main.vocab file (used for both training and eval).')
     args = parser.parse_args()
 
-    main_tok_path = args.data_dir / 'main.tok'
-    labels_txt_path = args.data_dir / 'labels.txt'
+    # --- Setup paths for training and evaluation ---
+    train_main_tok_path = args.train_data_dir / 'main.tok'
+    train_labels_txt_path = args.train_data_dir / 'labels.txt'
+    eval_main_tok_path = args.eval_data_dir / 'main.tok'
+    eval_labels_txt_path = args.eval_data_dir / 'labels.txt'
 
-    if not main_tok_path.is_file() or not labels_txt_path.is_file():
-        print(f"Error: main.tok or labels.txt not found in {args.data_dir}")
+    # --- Validate file existence ---
+    if not train_main_tok_path.is_file() or not train_labels_txt_path.is_file():
+        print(f"Error: Training data not found in {args.train_data_dir}")
+        return
+    if not eval_main_tok_path.is_file() or not eval_labels_txt_path.is_file():
+        print(f"Error: Evaluation data not found in {args.eval_data_dir}")
         return
 
+    # --- Load vocabulary ---
     try:
         print(f"Loading vocabulary from {args.vocab_path}...")
         vocab, _ = load_vocab(args.vocab_path)
@@ -43,12 +52,13 @@ def main():
         print(f"Error: {e}")
         return
 
-    print(f"Learning automaton from {args.data_dir} with RPNI...")
-    # We still need to run the learning process to get the automaton
-    rpni_learner = RPNILearner.from_files(main_tok_path, labels_txt_path, vocab)
+    # --- Learn automaton from training data ---
+    print(f"Learning automaton from {args.train_data_dir} with RPNI...")
+    rpni_learner = RPNILearner.from_files(train_main_tok_path, train_labels_txt_path, vocab)
     automaton = rpni_learner.learn()
     
-    print(f"\nEvaluating automaton for: {args.data_dir.name}")
+    # --- Evaluate automaton on evaluation data ---
+    print(f"\nEvaluating automaton on: {args.eval_data_dir.name}")
 
     # Build a transition dictionary for efficient lookup
     transitions_dict = {}
@@ -58,15 +68,19 @@ def main():
     correct_predictions = 0
     total_strings = 0
 
-    # Re-read the files to ensure correct sample-label correspondence
-    with open(main_tok_path, 'r') as f_tok, open(labels_txt_path, 'r') as f_labels:
+    # Read the evaluation files to ensure correct sample-label correspondence
+    with open(eval_main_tok_path, 'r') as f_tok, open(eval_labels_txt_path, 'r') as f_labels:
         for line_tok, line_label in zip(f_tok, f_labels):
             total_strings += 1
             
             tokens = line_tok.strip().split()
             true_label = line_label.strip() == 'True'
             
-            sample_indices = [vocab.to_int(token) for token in tokens]
+            try:
+                sample_indices = [vocab.to_int(token) for token in tokens]
+            except KeyError as e:
+                print(f"Warning: Token {e} not in vocabulary. Skipping string: '{' '.join(tokens)}'")
+                continue
 
             current_state = automaton.initial_state
             is_accepted = True

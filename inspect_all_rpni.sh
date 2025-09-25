@@ -25,6 +25,7 @@ for lang in "${LANGUAGES[@]}"; do
     
     DATA_DIR="$BASE_DATA_DIR/$lang"
     VOCAB_PATH="$DATA_DIR/main.vocab"
+    EVAL_PATH="$DATA_DIR/datasets/test"
 
     # Check if the data directory for the language exists
     if [ ! -d "$DATA_DIR" ]; then
@@ -34,7 +35,8 @@ for lang in "${LANGUAGES[@]}"; do
 
     # Run the evaluation script
     python evaluate_rpni_automaton.py \
-        --data-dir "$DATA_DIR" \
+        --train-data-dir "$DATA_DIR" \
+        --eval-data-dir "$EVAL_PATH" \
         --vocab-path "$VOCAB_PATH"
 done
 
