@@ -44,6 +44,7 @@ def main():
         return
 
     print(f"Learning automaton from {args.data_dir} with RPNI...")
+    # We still need to run the learning process to get the automaton
     rpni_learner = RPNILearner.from_files(main_tok_path, labels_txt_path, vocab)
     automaton = rpni_learner.learn()
     
@@ -54,32 +55,36 @@ def main():
     for t in automaton.transitions():
         transitions_dict[(t.state_from, t.symbol)] = t.state_to
 
-    # Combine positive and negative examples for evaluation
-    samples = rpni_learner.positive_examples + rpni_learner.negative_examples
-    true_labels = ([True] * len(rpni_learner.positive_examples)) + ([False] * len(rpni_learner.negative_examples))
-
     correct_predictions = 0
-    total_strings = len(samples)
+    total_strings = 0
 
-    for i, sample_indices in enumerate(samples):
-        current_state = automaton.initial_state
-        is_accepted = True
-        
-        for symbol_id in sample_indices:
-            next_state = transitions_dict.get((current_state, symbol_id))
-            if next_state is None:
-                is_accepted = False
-                break
-            current_state = next_state
-        
-        # If all symbols were consumed, check if the final state is an accept state
-        if is_accepted:
-            prediction = automaton.is_accept_state(current_state)
-        else:
-            prediction = False
+    # Re-read the files to ensure correct sample-label correspondence
+    with open(main_tok_path, 'r') as f_tok, open(labels_txt_path, 'r') as f_labels:
+        for line_tok, line_label in zip(f_tok, f_labels):
+            total_strings += 1
+            
+            tokens = line_tok.strip().split()
+            true_label = line_label.strip() == 'True'
+            
+            sample_indices = [vocab.stoi(token) for token in tokens]
 
-        if prediction == true_labels[i]:
-            correct_predictions += 1
+            current_state = automaton.initial_state
+            is_accepted = True
+            
+            for symbol_id in sample_indices:
+                next_state = transitions_dict.get((current_state, symbol_id))
+                if next_state is None:
+                    is_accepted = False
+                    break
+                current_state = next_state
+            
+            if is_accepted:
+                prediction = automaton.is_accept_state(current_state)
+            else:
+                prediction = False
+
+            if prediction == true_label:
+                correct_predictions += 1
 
     accuracy = (correct_predictions / total_strings) * 100 if total_strings > 0 else 0
     
