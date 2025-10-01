@@ -37,6 +37,8 @@ def main():
     model_interface.add_arguments(parser)
     model_interface.add_forward_arguments(parser)
     add_training_loop_arguments(parser)
+    parser.add_argument('--learn-fsa-with-rpni', action='store_true', default=False,
+                        help='Learn an FSA with RPNI from the training data and use it in the model.')
     args = parser.parse_args()
     model_interface.set_attributes_from_args(args)
     console_logger.info(f'parsed arguments: {args}')
@@ -57,8 +59,37 @@ def main():
 
     if do_profile_memory:
         memory_before = get_current_memory(device)
+
+    fsa_container = None
+    fsa_alphabet = None
+    if args.learn_fsa_with_rpni:
+        console_logger.info('Learning FSA with RPNI...')
+        from recognizers.automata.rpni_learner import RPNILearner
+        from rau.vocab import ToIntVocabularyBuilder
+
+        # Create the vocabulary object needed for RPNI learner
+        # This replicates the logic from load_prepared_data -> get_vocabularies
+        vocab, _ = model_interface.get_vocabularies(
+            vocabulary_data,
+            builder=ToIntVocabularyBuilder()
+        )
+        fsa_alphabet = vocabulary_data.tokens
+
+        # RPNILearner needs paths to main.tok and labels.txt
+        main_tok_path = args.training_data / 'main.tok'
+        labels_txt_path = args.training_data / 'labels.txt'
+
+        rpni_learner = RPNILearner.from_files(main_tok_path, labels_txt_path, vocab)
+        fsa_container = rpni_learner.learn()
+        console_logger.info(f'RPNI learned an FSA with {fsa_container.num_states()} states.')
+
     # Construct the model.
-    saver = model_interface.construct_saver(args, vocabulary_data)
+    saver = model_interface.construct_saver(
+        args,
+        vocabulary_data,
+        fsa_container=fsa_container,
+        fsa_alphabet=fsa_alphabet
+    )
     # Log some information about the model: parameter random seed, number of
     # parameters, GPU memory.
     if model_interface.parameter_seed is not None:

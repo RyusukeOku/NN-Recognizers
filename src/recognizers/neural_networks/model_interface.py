@@ -159,8 +159,14 @@ class RecognitionModelInterface(ModelInterface):
             help='Use FSA state features in the input layer.')
         group.add_argument('--fsa-name', type=str,
             help='Name of the structural FSA to use (when --use-fsa-features is enabled).')
-        group.add_argument('--fsa-embedding-dim', type=int,
-            help='Dimension of the FSA state embeddings (when --use-fsa-features is enabled).')
+        group.add_argument('--fsa-embedding-dim', type=int, default=16,
+                           help='The dimension of the FSA state embeddings.')
+        group.add_argument('--use-fst-annotator', action='store_true', default=False,
+            help='Use an FST to annotate the input sequence.')
+        group.add_argument('--fst-annotator-path', type=Path,
+            help='Path to the FST annotator data file.')
+        group.add_argument('--use-structural-fsa-from-automaton', type=str, default=None,
+            help='Use a structural FSA from a hand-coded automaton name.')
 
 
     def get_kwargs(self, args, vocabulary_data):
@@ -198,32 +204,61 @@ class RecognitionModelInterface(ModelInterface):
             lba_n_steps=getattr(args, 'lba_n_steps', 50)
         )
 
-        kwargs['use_fsa_features'] = args.use_fsa_features
-        if args.use_fsa_features:
-            if args.fsa_name is None:
-                raise ValueError('--fsa-name is required when using --use-fsa-features')
-            if args.fsa_embedding_dim is None:
-                raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
-
-            # Convert kebab-case fsa_name from command line to snake_case for function lookup
-            fsa_name_snake_case = args.fsa_name.replace('-', '_')
-            fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
-
-            if not hasattr(structural_fsas, fsa_func_name):
-                raise ValueError(f"Unknown FSA name: {args.fsa_name}")
-            
-            fsa_func = getattr(structural_fsas, fsa_func_name)
-            fsa_container, fsa_alphabet = fsa_func()
-
-            kwargs['fsa_name'] = args.fsa_name
-            kwargs['fsa_container'] = fsa_container
-            kwargs['fsa_alphabet'] = fsa_alphabet
-            kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
+        kwargs['use_fsa_features'] = getattr(args, 'use_fsa_features', False)
+        if kwargs['use_fsa_features']:
             kwargs['word_vocab'] = input_vocab
+            kwargs['fsa_embedding_dim'] = getattr(args, 'fsa_embedding_dim', None)
+
+            if getattr(args, 'fsa_name', None) is not None:
+                if kwargs['fsa_embedding_dim'] is None:
+                    raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features and --fsa-name')
+
+                from recognizers.hand_picked_languages import (
+                    cycle_navigation, dyck_k_m, even_pairs, first,
+                    modular_arithmetic_simple, parity, repeat_01
+                )
+
+                fsa_name = args.fsa_name
+                fsa_func = None
+                fsa_args = {}
+
+                hand_picked_map = {
+                    "cycle-navigation": cycle_navigation.cycle_navigation_dfa,
+                    "even-pairs": even_pairs.even_pairs_dfa,
+                    "first": first.first_dfa,
+                    "modular-arithmetic-simple": modular_arithmetic_simple.modular_arithmetic_simple_dfa,
+                    "parity": parity.parity_dfa,
+                    "repeat-01": repeat_01.repeat_01_dfa,
+                }
+
+                if fsa_name in hand_picked_map:
+                    fsa_func = hand_picked_map[fsa_name]
+                elif fsa_name.startswith("dyck-"):
+                    try:
+                        _, k, m = fsa_name.split('-')
+                        k, m = int(k), int(m)
+                        fsa_func = dyck_k_m.dyck_k_m_dfa
+                        fsa_args = {'k': k, 'm': m}
+                    except (ValueError, IndexError):
+                        raise ValueError(f"Invalid format for dyck FSA name: '{fsa_name}'. Expected 'dyck-k-m'.")
+                else:
+                    fsa_name_snake_case = fsa_name.replace('-', '_')
+                    fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
+                    if hasattr(structural_fsas, fsa_func_name):
+                        fsa_func = getattr(structural_fsas, fsa_func_name)
+
+                if fsa_func is None:
+                    raise ValueError(f"Unknown or unsupported FSA name: {fsa_name}")
+
+                fsa_container, fsa_alphabet = fsa_func(**fsa_args)
+
+                kwargs['fsa_name'] = args.fsa_name
+                kwargs['fsa_container'] = fsa_container
+                kwargs['fsa_alphabet'] = fsa_alphabet
 
         return kwargs
 
-    def construct_saver(self, args, vocabulary_data=None):
+    def construct_saver(self, args, vocabulary_data=None, fsa_container=None, fsa_alphabet=None):
         device = self.get_device(args)
 
         if self.use_load and getattr(args, 'load_model', None) is not None:
@@ -252,6 +287,18 @@ class RecognitionModelInterface(ModelInterface):
             # This wrapper ignores the kwargs passed by read_saver (from kwargs.json)
             # and uses our fully reconstructed kwargs instead.
             def model_constructor_wrapper(**ignored_kwargs):
+                if fsa_container is not None:
+                    full_kwargs_for_construction['fsa_container'] = fsa_container
+                    full_kwargs_for_construction['fsa_alphabet'] = fsa_alphabet
+                    full_kwargs_for_construction['use_fsa_features'] = True
+                    uses_bos = full_kwargs_for_construction['architecture'] == 'transformer'
+                    uses_output_vocab = full_kwargs_for_construction['use_language_modeling_head'] or full_kwargs_for_construction['use_next_symbols_head']
+                    input_vocab, _ = get_vocabularies(
+                        vocabulary_data,
+                        use_bos=uses_bos,
+                        use_eos=uses_output_vocab
+                    )
+                    full_kwargs_for_construction['word_vocab'] = input_vocab
                 return self.construct_model(**full_kwargs_for_construction)
 
             # read_saver will use our wrapper to build the model shell,
@@ -273,6 +320,19 @@ class RecognitionModelInterface(ModelInterface):
             # --- TRAINING PATH ---
             if self.use_init:
                 kwargs = self.get_kwargs(args, vocabulary_data)
+                if fsa_container is not None:
+                    kwargs['fsa_container'] = fsa_container
+                    kwargs['fsa_alphabet'] = fsa_alphabet
+                    kwargs['use_fsa_features'] = True
+                    kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
+                    uses_bos = kwargs['architecture'] == 'transformer'
+                    uses_output_vocab = kwargs['use_language_modeling_head'] or kwargs['use_next_symbols_head']
+                    input_vocab, _ = get_vocabularies(
+                        vocabulary_data,
+                        use_bos=uses_bos,
+                        use_eos=uses_output_vocab
+                    )
+                    kwargs['word_vocab'] = input_vocab
                 output = args.output
                 # Construct the saver, which also constructs the model
                 saver = construct_saver(self.construct_model, output, **kwargs)
@@ -348,7 +408,7 @@ class RecognitionModelInterface(ModelInterface):
         )
 
     def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa_container=None, fsa_alphabet=None, word_vocab=None, fsa_name=None, fsa_embedding_dim=None, **kwargs):
-        if use_fsa_features and fsa_container is None:
+        if use_fsa_features and fsa_container is None and fsa_name is not None:
             # Reconstruct FSA if loading from saved model
             fsa_func_name = f'{fsa_name}_structural_fsa_container'
             if not hasattr(structural_fsas, fsa_func_name):

@@ -10,7 +10,7 @@ import torch
 from rau.tasks.common.training_loop import MicroAveragedScoreAccumulator
 
 from recognizers.tools.jsonl import write_json_line
-from recognizers.neural_networks.data import load_prepared_data_from_directory
+from recognizers.neural_networks.data import load_prepared_data_from_directory, load_vocabulary_data
 from recognizers.neural_networks.model_interface import RecognitionModelInterface
 from recognizers.neural_networks.training_loop import generate_batches, get_loss_terms
 
@@ -87,25 +87,55 @@ def main():
         'Evaluate a language model on a dataset. Output the results as JSON.'
     )
     parser.add_argument('--training-data', type=pathlib.Path, required=True,
-        help='A directory containing training data. The file '
-             '<training-data>/datasets/<input>/main.prepared will be used as '
-             'input, and the file '
-             '<training-data>/main.vocab will be used as the vocabulary.')
+        help='A directory containing training data. The file <training-data>/datasets/<input>/main.prepared will be used as input, and the file <training-data>/main.vocab will be used as the vocabulary.')
     parser.add_argument('--datasets', nargs='+', required=True,
-        help='Names of datasets in the training data directory that will be '
-             'used as input. The file '
-             '<training-data>/datasets/<dataset>/main.prepared will be used as '
-             'input. Multiple datasets can be passed. The name "training" '
-             'can be used to evaluate on the training data.')
+        help='Names of datasets in the training data directory that will be used as input. The file <training-data>/datasets/<dataset>/main.prepared will be used as input. Multiple datasets can be passed. The name "training" can be used to evaluate on the training data.')
     parser.add_argument('--output', type=pathlib.Path, required=True,
         help='A directory where output files will be written.')
     parser.add_argument('--batching-max-tokens', type=int, required=True,
         help='The maximum number of tokens allowed per batch.')
+    parser.add_argument('--learn-fsa-with-rpni', action='store_true', default=False,
+                        help='Learn an FSA with RPNI from the training data and use it in the model.')
     model_interface.add_arguments(parser)
     model_interface.add_forward_arguments(parser)
     args = parser.parse_args()
 
-    saver = model_interface.construct_saver(args)
+    # Load saved model arguments and merge with command-line arguments
+    # This is necessary so that set_attributes_from_args gets the correct architecture info
+    if getattr(args, 'load_model', None):
+        kwargs_path = pathlib.Path(args.load_model) / 'kwargs.json'
+        if not kwargs_path.is_file():
+            raise FileNotFoundError(f"Cannot find kwargs.json in {args.load_model}")
+        with open(kwargs_path, 'r') as f:
+            loaded_kwargs = json.load(f)
+        
+        # Merge command-line arguments into the loaded arguments.
+        # Command-line arguments take precedence.
+        cmd_line_args = {k: v for k, v in vars(args).items() if v is not None}
+        loaded_kwargs.update(cmd_line_args)
+        args = argparse.Namespace(**loaded_kwargs)
+
+    model_interface.set_attributes_from_args(args)
+
+    fsa_container = None
+    fsa_alphabet = None
+    vocabulary_data = None
+    if args.learn_fsa_with_rpni:
+        print('Learning FSA with RPNI for evaluation...')
+        from recognizers.automata.rpni_learner import RPNILearner
+        from rau.vocab import ToIntVocabularyBuilder
+        vocabulary_data = load_vocabulary_data(args, parser)
+        vocab, _ = model_interface.get_vocabularies(
+            vocabulary_data,
+            builder=ToIntVocabularyBuilder()
+        )
+        fsa_alphabet = vocabulary_data.tokens
+        main_tok_path = args.training_data / 'main.tok'
+        labels_txt_path = args.training_data / 'labels.txt'
+        rpni_learner = RPNILearner.from_files(main_tok_path, labels_txt_path, vocab)
+        fsa_container = rpni_learner.learn()
+
+    saver = model_interface.construct_saver(args, vocabulary_data=vocabulary_data, fsa_container=fsa_container, fsa_alphabet=fsa_alphabet)
     for dataset in args.datasets:
         if dataset == 'training':
             input_directory = args.training_data
