@@ -98,6 +98,6 @@ python src/recognizers/neural_networks/train.py \
   --learning-rate-decay-factor 0.5 \
   --examples-per-checkpoint 10000 \
   "${progress_args[@]}" \
-  --learn-fsa-with-rpni \
+  --learn-fsa-with-lstar \
   --fsa-embedding-dim 8
 bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir"

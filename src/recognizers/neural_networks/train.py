@@ -1,6 +1,7 @@
 import argparse
 import logging
 import sys
+import pathlib
 
 import humanfriendly
 
@@ -17,6 +18,55 @@ from recognizers.neural_networks.training_loop import (
     add_training_loop_arguments,
     get_training_loop_kwargs,
 )
+# Imports for L*
+from recognizers.learning_algs.SUL import SUL
+from recognizers.learning_algs.Oracle import Oracle
+from recognizers.learning_algs.LStar import run_Lstar
+from recognizers.automata.finite_automaton import FiniteAutomatonContainer, Transition
+from rau.vocab import ToIntVocabularyBuilder
+
+
+class DataSUL(SUL):
+    """A System Under Learning for DFA learning from labeled data."""
+    def __init__(self, positive_examples):
+        super().__init__()
+        self.positive_examples = set(positive_examples)
+
+    def pre(self):
+        pass
+
+    def post(self):
+        pass
+
+    def step(self, letter):
+        # L* for DFA uses step(None) for the empty string query.
+        if letter is None:
+            return tuple() in self.positive_examples
+        # This SUL is only for whole-sequence queries, so individual steps are not supported.
+        raise NotImplementedError("Step-by-step execution is not supported.")
+
+    def query(self, word: tuple) -> list:
+        self.num_queries += 1
+        self.num_steps += len(word)
+        is_accepted = word in self.positive_examples
+        # The observation table for DFA learning expects a list with a single boolean.
+        return [is_accepted]
+
+class DataEquivalenceOracle(Oracle):
+    """An Equivalence Oracle that finds counterexamples from a finite dataset."""
+    def __init__(self, alphabet, sul, all_examples):
+        super().__init__(alphabet, sul)
+        self.all_examples = all_examples
+
+    def find_cex(self, hypothesis):
+        for sequence, is_positive in self.all_examples:
+            # The `accepts` method of the hypothesis automaton checks if the sequence is in the language.
+            if hypothesis.accepts(sequence) != is_positive:
+                # Found a discrepancy between the hypothesis and the ground truth data.
+                return sequence
+        # No counterexample found in the provided data.
+        return None
+
 
 def main():
 
@@ -39,6 +89,8 @@ def main():
     add_training_loop_arguments(parser)
     parser.add_argument('--learn-fsa-with-rpni', action='store_true', default=False,
                         help='Learn an FSA with RPNI from the training data and use it in the model.')
+    parser.add_argument('--learn-fsa-with-lstar', action='store_true', default=False,
+                        help='Learn an FSA with L* from the training data and use it in the model.')
     args = parser.parse_args()
     model_interface.set_attributes_from_args(args)
     console_logger.info(f'parsed arguments: {args}')
@@ -65,7 +117,6 @@ def main():
     if args.learn_fsa_with_rpni:
         console_logger.info('Learning FSA with RPNI...')
         from recognizers.automata.rpni_learner import RPNILearner
-        from rau.vocab import ToIntVocabularyBuilder
 
         # Create the vocabulary object needed for RPNI learner
         # This replicates the logic from load_prepared_data -> get_vocabularies
@@ -82,6 +133,73 @@ def main():
         rpni_learner = RPNILearner.from_files(main_tok_path, labels_txt_path, vocab)
         fsa_container = rpni_learner.learn()
         console_logger.info(f'RPNI learned an FSA with {fsa_container.num_states()} states.')
+    elif args.learn_fsa_with_lstar:
+        console_logger.info('Learning FSA with L*...')
+
+        # Load vocabulary to map tokens to integers.
+        vocab, _ = model_interface.get_vocabularies(
+            vocabulary_data,
+            builder=ToIntVocabularyBuilder()
+        )
+        fsa_alphabet = vocabulary_data.tokens
+
+        # Load positive and negative examples from data files.
+        main_tok_path = args.training_data / 'main.tok'
+        labels_txt_path = args.training_data / 'labels.txt'
+        positive_examples = set()
+        all_examples_for_oracle = []
+        with main_tok_path.open() as f_tok, labels_txt_path.open() as f_lbl:
+            for line_tok, line_lbl in zip(f_tok, f_lbl):
+                tokens = line_tok.strip().split()
+                # Convert token strings to a tuple of integers.
+                int_sequence = tuple(vocab.to_int(t) for t in tokens)
+                is_positive = bool(int(line_lbl.strip()))
+
+                if is_positive:
+                    positive_examples.add(int_sequence)
+                all_examples_for_oracle.append((int_sequence, is_positive))
+
+        # The alphabet for L* is the set of integer token IDs.
+        lstar_alphabet = [i for i in range(len(vocab)) if i != vocab.pad_index]
+
+        # Instantiate the SUL and the Equivalence Oracle.
+        sul = DataSUL(positive_examples=positive_examples)
+        eq_oracle = DataEquivalenceOracle(
+            alphabet=lstar_alphabet,
+            sul=sul,
+            all_examples=all_examples_for_oracle
+        )
+
+        # Run the L* algorithm to learn a DFA.
+        learned_dfa = run_Lstar(
+            alphabet=lstar_alphabet,
+            sul=sul,
+            eq_oracle=eq_oracle,
+            automaton_type='dfa',
+            print_level=2  # Log hypothesis size and final results.
+        )
+
+        console_logger.info(f'L* learned an FSA with {learned_dfa.size} states.')
+
+        # Convert the learned aalpy DFA to a FiniteAutomatonContainer.
+        state_to_id = {state: i for i, state in enumerate(learned_dfa.states)}
+        transitions = []
+        for state_from, state_id_from in state_to_id.items():
+            for symbol, state_to in state_from.transitions.items():
+                transitions.append(Transition(
+                    state_from=state_id_from,
+                    symbol=symbol,
+                    state_to=state_to_id[state_to]
+                ))
+
+        initial_state_id = state_to_id[learned_dfa.initial_state]
+        accepting_states_ids = {state_to_id[s] for s in learned_dfa.states if s.is_accepting}
+
+        fsa_container = FiniteAutomatonContainer(
+            initial_state=initial_state_id,
+            accepting_states=list(accepting_states_ids),
+            transitions=transitions
+        )
 
     # Construct the model.
     saver = model_interface.construct_saver(
