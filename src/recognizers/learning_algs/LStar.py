@@ -1,11 +1,11 @@
 import time
 
 import Oracle, SUL
-from HelperFunctions import extend_set, print_learning_info, print_observation_table, all_prefixes
-from CounterExampleProcessing import longest_prefix_cex_processing, rs_cex_processing, \
+from src.recognizers.learning_algs.HelperFunctions import extend_set, print_learning_info, print_observation_table, all_prefixes
+from src.recognizers.learning_algs.CounterExampleProcessing import longest_prefix_cex_processing, rs_cex_processing, \
     counterexample_successfully_processed, linear_cex_processing, exponential_cex_processing
-from ObservationTable import ObservationTable
-from SUL import CacheSUL
+from src.recognizers.learning_algs.ObservationTable import ObservationTable
+from src.recognizers.learning_algs.SUL import CacheSUL
 
 counterexample_processing_strategy = [None, 'rs', 'longest_prefix', 'linear_fwd', 'linear_bwd', 'exponential_fwd',
                                       'exponential_bwd']

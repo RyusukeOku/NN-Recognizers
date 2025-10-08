@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from src.recognizers.automata.automaton_aalpy import Automaton
 import Oracle
-from SUL import SUL
+from src.recognizers.learning_algs.SUL import SUL
 from src.recognizers.automata.automaton_aalpy import Dfa, DfaState, MealyState, MealyMachine, MooreMachine, MooreState
 
 aut_type = ['dfa', 'mealy', 'moore']

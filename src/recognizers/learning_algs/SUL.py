@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from CacheTree import CacheTree, CacheDict
+from src.recognizers.learning_algs.CacheTree import CacheTree, CacheDict
 
 
 class SUL(ABC):

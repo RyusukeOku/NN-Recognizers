@@ -1,5 +1,5 @@
-from SUL import SUL
-from HelperFunctions import all_suffixes, all_prefixes
+from src.recognizers.learning_algs.SUL import SUL
+from src.recognizers.learning_algs.HelperFunctions import all_suffixes, all_prefixes
 
 
 def counterexample_successfully_processed(sul, cex, hypothesis):
