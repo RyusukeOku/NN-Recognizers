@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-import SUL
+import src.recognizers.learning_algs.SUL as SUL
 
 
 class Oracle(ABC):
