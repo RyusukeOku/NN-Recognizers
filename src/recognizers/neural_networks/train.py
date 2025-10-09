@@ -181,12 +181,17 @@ def main():
         )
 
         # Run the L* algorithm to learn a DFA.
+        # Caching is disabled because the default cache implementation assumes a Mealy machine-style
+        # output for each input symbol, which is not true for our DFA-style SUL that provides
+        # a single acceptance output for the whole sequence. This mismatch causes incorrect
+        # non-determinism errors.
         learned_dfa = run_Lstar(
             alphabet=lstar_alphabet,
             sul=sul,
             eq_oracle=eq_oracle,
             automaton_type='dfa',
-            print_level=2  # Log hypothesis size and final results.
+            print_level=2,  # Log hypothesis size and final results.
+            cache_and_non_det_check=False
         )
 
         console_logger.info(f'L* learned an FSA with {learned_dfa.size} states.')
