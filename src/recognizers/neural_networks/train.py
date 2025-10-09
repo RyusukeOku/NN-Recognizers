@@ -60,8 +60,15 @@ class DataEquivalenceOracle(Oracle):
 
     def find_cex(self, hypothesis):
         for sequence, is_positive in self.all_examples:
-            # The `accepts` method of the hypothesis automaton checks if the sequence is in the language.
-            if hypothesis.accepts(sequence) != is_positive:
+            # The `execute_sequence` method returns the output for each step. For a DFA,
+            # the output of the last step is the acceptance value.
+            if sequence:
+                hypothesis_accepts = hypothesis.execute_sequence(hypothesis.initial_state, sequence)[-1]
+            else:
+                # Handle the empty sequence separately. Acceptance is determined by the initial state.
+                hypothesis_accepts = hypothesis.initial_state.is_accepting
+
+            if hypothesis_accepts != is_positive:
                 # Found a discrepancy between the hypothesis and the ground truth data.
                 return sequence
         # No counterexample found in the provided data.
