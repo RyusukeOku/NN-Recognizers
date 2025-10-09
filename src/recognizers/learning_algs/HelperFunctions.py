@@ -6,6 +6,7 @@ from collections import defaultdict
 from src.recognizers.automata.MarkovChain import MarkovChain, McState
 from src.recognizers.automata.MooreMachine import MooreMachine
 from src.recognizers.automata.Dfa import Dfa, DfaState
+from src.recognizers.automata.Mdp import Mdp
 
 
 def extend_set(list_to_extend: list, new_elements: list) -> list:
