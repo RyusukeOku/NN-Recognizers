@@ -1,8 +1,8 @@
 import random
 from typing import Generic, Tuple, List
 
-from aalpy.base import Automaton, AutomatonState
-from aalpy.base.Automaton import OutputType
+from src.recognizers.automata.automaton_aalpy import Automaton, AutomatonState
+from src.recognizers.automata.automaton_aalpy import OutputType
 
 
 class McState(AutomatonState, Generic[OutputType]):
