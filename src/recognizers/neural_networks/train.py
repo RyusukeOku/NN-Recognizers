@@ -160,7 +160,10 @@ def main():
                 all_examples_for_oracle.append((int_sequence, is_positive))
 
         # The alphabet for L* is the set of integer token IDs.
-        lstar_alphabet = [i for i in range(len(vocab)) if i != vocab.pad_index]
+        # The vocabulary object used here does not expose pad_index, so we pass the
+        # entire range of token IDs to the learner. The learner will correctly
+        # infer that sequences containing padding tokens are not part of the language.
+        lstar_alphabet = list(range(len(vocab)))
 
         # Instantiate the SUL and the Equivalence Oracle.
         sul = DataSUL(positive_examples=positive_examples)
