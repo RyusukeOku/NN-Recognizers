@@ -1,6 +1,7 @@
 import time
 
-import Oracle, SUL
+import src.recognizers.learning_algs.Oracle as Oracle
+from src.recognizers.learning_algs.SUL import SUL
 from src.recognizers.learning_algs.HelperFunctions import extend_set, print_learning_info, print_observation_table, all_prefixes
 from src.recognizers.learning_algs.CounterExampleProcessing import longest_prefix_cex_processing, rs_cex_processing, \
     counterexample_successfully_processed, linear_cex_processing, exponential_cex_processing
