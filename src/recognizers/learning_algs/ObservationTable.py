@@ -3,7 +3,9 @@ from collections import defaultdict
 from src.recognizers.automata.automaton_aalpy import Automaton
 import src.recognizers.learning_algs.Oracle as Oracle
 from src.recognizers.learning_algs.SUL import SUL
-from src.recognizers.automata.automaton_aalpy import Dfa, DfaState, MealyState, MealyMachine, MooreMachine, MooreState
+from src.recognizers.automata.Dfa import Dfa, DfaState
+from src.recognizers.automata.MealyMachine import MealyState, MealyMachine
+from src.recognizers.automata.MooreMachine import MooreMachine, MooreState
 
 aut_type = ['dfa', 'mealy', 'moore']
 closing_options = ['shortest_first', 'longest_first', 'single', 'single_longest']
