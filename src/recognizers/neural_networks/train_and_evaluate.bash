@@ -80,10 +80,6 @@ for loss_term in ${loss_terms//+/ }; do
 done
 
 model_dir=$(get_model_dir "$base_dir" "$language" "$architecture" "$loss_terms" "$validation_data" "$trial_no")
-
-python src/recognizers/automata/learn_edsm_automaton.py \
-  --training-data "$language_dir"
-
 python src/recognizers/neural_networks/train.py \
   --output "$model_dir" \
   --training-data "$language_dir" \
