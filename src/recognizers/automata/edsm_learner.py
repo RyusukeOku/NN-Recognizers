@@ -64,7 +64,6 @@ class EDSMLearner:
         learned_dfa: DeterministicAutomaton = run_EDSM(
             data=self.learning_data,
             automaton_type='dfa',
-            delta=delta,
             print_info=True # 必要に応じて False に変更
         )
 
