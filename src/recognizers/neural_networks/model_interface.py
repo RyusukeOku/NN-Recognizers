@@ -167,6 +167,8 @@ class RecognitionModelInterface(ModelInterface):
             help='Path to the FST annotator data file.')
         group.add_argument('--use-structural-fsa-from-automaton', type=str, default=None,
             help='Use a structural FSA from a hand-coded automaton name.')
+        group.add_argument('--learn-fsa-with-edsm', action='store_true', default=False,
+            help='Learn an FSA with EDSM from the training data and use it in the model.')
 
 
     def get_kwargs(self, args, vocabulary_data):

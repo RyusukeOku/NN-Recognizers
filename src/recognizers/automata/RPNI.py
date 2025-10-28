@@ -73,9 +73,9 @@ def run_PAPNI(data, vpa_alphabet, algorithm='edsm', print_info=True):
 
         VPA conforming to the data, or None if data is non-deterministic.
     """
-    from aalpy.utils import is_balanced
-    from aalpy.automata.Vpa import vpa_from_dfa_representation
-    from aalpy.learning_algs import run_EDSM
+    from src.recognizers.learning_algs.HelperFunctions import is_balanced
+    from src.recognizers.automata.Vpa import vpa_from_dfa_representation
+    from src.recognizers.automata.GsmAlgorithms import run_EDSM
 
     assert algorithm in {'gsm', 'classic', 'edsm'}
 
