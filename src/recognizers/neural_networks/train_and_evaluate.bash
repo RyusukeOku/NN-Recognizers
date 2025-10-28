@@ -80,6 +80,10 @@ for loss_term in ${loss_terms//+/ }; do
 done
 
 model_dir=$(get_model_dir "$base_dir" "$language" "$architecture" "$loss_terms" "$validation_data" "$trial_no")
+
+python src/recognizers/automata/learn_edsm_automaton.py \
+  --training-data "$language_dir"
+
 python src/recognizers/neural_networks/train.py \
   --output "$model_dir" \
   --training-data "$language_dir" \
@@ -98,6 +102,6 @@ python src/recognizers/neural_networks/train.py \
   --learning-rate-decay-factor 0.5 \
   --examples-per-checkpoint 10000 \
   "${progress_args[@]}" \
-  --learn-fsa-with-lstar \
+  --learn-fsa-with-edsm \
   --fsa-embedding-dim 8
 bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir"

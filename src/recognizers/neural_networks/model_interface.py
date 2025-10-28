@@ -207,14 +207,38 @@ class RecognitionModelInterface(ModelInterface):
         )
 
         kwargs['use_fsa_features'] = getattr(args, 'use_fsa_features', False)
+        # EDSMフラグも use_fsa_features を有効にする
+        if getattr(args, 'learn_fsa_with_edsm', False):
+            kwargs['use_fsa_features'] = True
+
         if kwargs['use_fsa_features']:
             kwargs['word_vocab'] = input_vocab
             kwargs['fsa_embedding_dim'] = getattr(args, 'fsa_embedding_dim', None)
-
-            if getattr(args, 'fsa_name', None) is not None:
-                if kwargs['fsa_embedding_dim'] is None:
+            if kwargs['fsa_embedding_dim'] is None:
                     raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features and --fsa-name')
 
+
+            if getattr(args, 'learn_fsa_with_edsm', False):
+                # EDSMオートマトンをロード
+                if not hasattr(args, 'training_data') or args.training_data is None:
+                    raise ValueError("--training-data is required when using --learn-fsa-with-edsm")
+                edsm_path = args.training_data / 'edsm_automaton.pt'
+                if not edsm_path.is_file():
+                    raise FileNotFoundError(
+                        f"Cannot find edsm_automaton.pt in {args.training_data}. "
+                        f"Please run learn_edsm_automaton.py first."
+                    )
+                print(f"Loading learned EDSM automaton from {edsm_path}")
+                # weights_only=False が必要 (pickle化されたクラスをロードするため)
+                loaded_data = torch.load(edsm_path, weights_only=False)
+                kwargs['fsa_container'] = loaded_data['automaton']
+                kwargs['fsa_alphabet'] = loaded_data['alphabet']
+                kwargs['fsa_name'] = 'edsm_learned' # 識別のためのダミー名
+
+            if getattr(args, 'fsa_name', None) is not None:
+                # 既存の手動FSAロードロジック (変更なし)
+                if kwargs['fsa_embedding_dim'] is None:
+                    raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features and --fsa-name')
                 from recognizers.hand_picked_languages import (
                     cycle_navigation, dyck_k_m, even_pairs, first,
                     modular_arithmetic_simple, parity, repeat_01
@@ -289,7 +313,26 @@ class RecognitionModelInterface(ModelInterface):
             # This wrapper ignores the kwargs passed by read_saver (from kwargs.json)
             # and uses our fully reconstructed kwargs instead.
             def model_constructor_wrapper(**ignored_kwargs):
-                if fsa_container is not None:
+                # EDSMオートマトンのロード（ロード時）
+                if getattr(temp_args, 'learn_fsa_with_edsm', False):
+                    edsm_path = args.training_data / 'edsm_automaton.pt'
+                    if not edsm_path.is_file():
+                        raise FileNotFoundError(f"Cannot find edsm_automaton.pt in {args.training_data} for loading.")
+                    # weights_only=False が必要
+                    loaded_data = torch.load(edsm_path, weights_only=False)
+                    full_kwargs_for_construction['fsa_container'] = loaded_data['automaton']
+                    full_kwargs_for_construction['fsa_alphabet'] = loaded_data['alphabet']
+                    full_kwargs_for_construction['use_fsa_features'] = True
+                    # word_vocab も再構築が必要 (get_kwargs からコピー)
+                    uses_bos = full_kwargs_for_construction['architecture'] == 'transformer'
+                    uses_output_vocab = full_kwargs_for_construction['use_language_modeling_head'] or full_kwargs_for_construction['use_next_symbols_head']
+                    input_vocab, _ = get_vocabularies(
+                        vocabulary_data,
+                        use_bos=uses_bos,
+                        use_eos=uses_output_vocab
+                    )
+                    full_kwargs_for_construction['word_vocab'] = input_vocab
+                elif fsa_container is not None:
                     full_kwargs_for_construction['fsa_container'] = fsa_container
                     full_kwargs_for_construction['fsa_alphabet'] = fsa_alphabet
                     full_kwargs_for_construction['use_fsa_features'] = True
