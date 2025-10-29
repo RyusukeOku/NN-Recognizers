@@ -247,7 +247,7 @@ class RecognitionModelInterface(ModelInterface):
                 kwargs['fsa_alphabet'] = fsa_alphabet
                 # --- EDSM学習 終了 ---
 
-            elif getattr(args, 'fsa_name', None) is not None:
+            elif getattr(args, 'fsa_name', None) is not None and getattr(args, 'fsa_name') != 'edsm_learned':
                 fsa_container, fsa_alphabet = self._get_fsa_from_name(args.fsa_name)
 
                 kwargs['fsa_name'] = args.fsa_name
@@ -473,7 +473,7 @@ class RecognitionModelInterface(ModelInterface):
         )
 
     def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa_container=None, fsa_alphabet=None, word_vocab=None, fsa_name=None, fsa_embedding_dim=None, **kwargs):
-        if use_fsa_features and fsa_container is None and fsa_name is not None:
+        if use_fsa_features and fsa_container is None and fsa_name is not None and fsa_name != 'edsm_learned':
             # Reconstruct FSA if loading from saved model
             fsa_container, fsa_alphabet = self._get_fsa_from_name(fsa_name)
 
