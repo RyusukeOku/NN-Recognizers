@@ -119,38 +119,12 @@ def main():
 
     model_interface.set_attributes_from_args(args)
 
+    # The model interface is responsible for all FSA learning and loading.
+    # We pass None for the container and alphabet, and the interface will
+    # use the arguments in `args` to prepare the FSA.
     fsa_container = None
     fsa_alphabet = None
-    vocabulary_data = None
-    if args.learn_fsa_with_rpni:
-        print('Learning FSA with RPNI for evaluation...')
-        from recognizers.automata.rpni_learner import RPNILearner
-        from rau.vocab import ToIntVocabularyBuilder
-        vocabulary_data = load_vocabulary_data(args, parser)
-        vocab, _ = model_interface.get_vocabularies(
-            vocabulary_data,
-            builder=ToIntVocabularyBuilder()
-        )
-        fsa_alphabet = vocabulary_data.tokens
-        main_tok_path = args.training_data / 'main.tok'
-        labels_txt_path = args.training_data / 'labels.txt'
-        rpni_learner = RPNILearner.from_files(main_tok_path, labels_txt_path, vocab)
-        fsa_container = rpni_learner.learn()
-    elif args.learn_fsa_with_edsm:
-        print('Learning FSA with EDSM for evaluation...')
-        from recognizers.automata.edsm_learner import EDSMLearner
-        from rau.vocab import ToIntVocabularyBuilder
-        if vocabulary_data is None:
-            vocabulary_data = load_vocabulary_data(args, parser)
-        vocab, _ = model_interface.get_vocabularies(
-            vocabulary_data,
-            builder=ToIntVocabularyBuilder()
-        )
-        main_tok_path = args.training_data / 'main.tok'
-        labels_txt_path = args.training_data / 'labels.txt'
-        edsm_learner = EDSMLearner.from_files(main_tok_path, labels_txt_path, vocab)
-        fsa_container = edsm_learner.learn()
-        fsa_alphabet = edsm_learner.get_alphabet()
+    vocabulary_data = None # The interface will load this if needed.
 
     saver = model_interface.construct_saver(args, vocabulary_data=vocabulary_data, fsa_container=fsa_container, fsa_alphabet=fsa_alphabet)
     for dataset in args.datasets:
