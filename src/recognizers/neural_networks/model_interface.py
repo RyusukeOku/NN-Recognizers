@@ -215,8 +215,8 @@ class RecognitionModelInterface(ModelInterface):
         if kwargs['use_fsa_features']:
             kwargs['word_vocab'] = input_vocab
             kwargs['fsa_embedding_dim'] = getattr(args, 'fsa_embedding_dim', None)
-            if kwargs['fsa_embedding_dim'] is None:
-                    raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features and --fsa-name')
+            if kwargs.get('fsa_embedding_dim') is None:
+                    raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
 
 
             if getattr(args, 'learn_fsa_with_edsm', False):
@@ -239,62 +239,60 @@ class RecognitionModelInterface(ModelInterface):
 
                 # EDSM学習の実行とコンテナへの変換
                 # TODO: --edsm-delta のような引数を追加して delta を渡せるようにするのが望ましい
-                fsa_container = learner.learn(delta=0.005)
-                fsa_alphabet = learner.get_alphabet()
+                fsa_container, fsa_alphabet = learner.learn(delta=0.005)
 
-                kwargs['fsa_name'] = args.fsa_name
+                kwargs['fsa_name'] = 'edsm_learned'
                 kwargs['fsa_container'] = fsa_container
                 kwargs['fsa_alphabet'] = fsa_alphabet
                 # --- EDSM学習 終了 ---
 
-            if getattr(args, 'fsa_name', None) is not None:
-                # 既存の手動FSAロードロジック (変更なし)
-                if kwargs['fsa_embedding_dim'] is None:
-                    raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features and --fsa-name')
-                from recognizers.hand_picked_languages import (
-                    cycle_navigation, dyck_k_m, even_pairs, first,
-                    modular_arithmetic_simple, parity, repeat_01
-                )
-
-                fsa_name = args.fsa_name
-                fsa_func = None
-                fsa_args = {}
-
-                hand_picked_map = {
-                    "cycle-navigation": cycle_navigation.cycle_navigation_dfa,
-                    "even-pairs": even_pairs.even_pairs_dfa,
-                    "first": first.first_dfa,
-                    "modular-arithmetic-simple": modular_arithmetic_simple.modular_arithmetic_simple_dfa,
-                    "parity": parity.parity_dfa,
-                    "repeat-01": repeat_01.repeat_01_dfa,
-                }
-
-                if fsa_name in hand_picked_map:
-                    fsa_func = hand_picked_map[fsa_name]
-                elif fsa_name.startswith("dyck-"):
-                    try:
-                        _, k, m = fsa_name.split('-')
-                        k, m = int(k), int(m)
-                        fsa_func = dyck_k_m.dyck_k_m_dfa
-                        fsa_args = {'k': k, 'm': m}
-                    except (ValueError, IndexError):
-                        raise ValueError(f"Invalid format for dyck FSA name: '{fsa_name}'. Expected 'dyck-k-m'.")
-                else:
-                    fsa_name_snake_case = fsa_name.replace('-', '_')
-                    fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
-                    if hasattr(structural_fsas, fsa_func_name):
-                        fsa_func = getattr(structural_fsas, fsa_func_name)
-
-                if fsa_func is None:
-                    raise ValueError(f"Unknown or unsupported FSA name: {fsa_name}")
-
-                fsa_container, fsa_alphabet = fsa_func(**fsa_args)
+            elif getattr(args, 'fsa_name', None) is not None:
+                fsa_container, fsa_alphabet = self._get_fsa_from_name(args.fsa_name)
 
                 kwargs['fsa_name'] = args.fsa_name
                 kwargs['fsa_container'] = fsa_container
                 kwargs['fsa_alphabet'] = fsa_alphabet
 
         return kwargs
+
+    def _get_fsa_from_name(self, fsa_name):
+        from recognizers.hand_picked_languages import (
+            cycle_navigation, dyck_k_m, even_pairs, first,
+            modular_arithmetic_simple, parity, repeat_01
+        )
+
+        fsa_func = None
+        fsa_args = {}
+
+        hand_picked_map = {
+            "cycle-navigation": cycle_navigation.cycle_navigation_dfa,
+            "even-pairs": even_pairs.even_pairs_dfa,
+            "first": first.first_dfa,
+            "modular-arithmetic-simple": modular_arithmetic_simple.modular_arithmetic_simple_dfa,
+            "parity": parity.parity_dfa,
+            "repeat-01": repeat_01.repeat_01_dfa,
+        }
+
+        if fsa_name in hand_picked_map:
+            fsa_func = hand_picked_map[fsa_name]
+        elif fsa_name.startswith("dyck-"):
+            try:
+                _, k, m = fsa_name.split('-')
+                k, m = int(k), int(m)
+                fsa_func = dyck_k_m.dyck_k_m_dfa
+                fsa_args = {'k': k, 'm': m}
+            except (ValueError, IndexError):
+                raise ValueError(f"Invalid format for dyck FSA name: '{fsa_name}'. Expected 'dyck-k-m'.")
+        else:
+            fsa_name_snake_case = fsa_name.replace('-', '_')
+            fsa_func_name = f'{fsa_name_snake_case}_structural_fsa_container'
+            if hasattr(structural_fsas, fsa_func_name):
+                fsa_func = getattr(structural_fsas, fsa_func_name)
+
+        if fsa_func is None:
+            raise ValueError(f"Unknown or unsupported FSA name: {fsa_name}")
+
+        return fsa_func(**fsa_args)
 
     def construct_saver(self, args, vocabulary_data=None, fsa_container=None, fsa_alphabet=None):
         device = self.get_device(args)
@@ -476,11 +474,7 @@ class RecognitionModelInterface(ModelInterface):
     def _construct_standard_model(self, architecture, add_ngram_head_n, num_layers, d_model, num_heads, feedforward_size, dropout, hidden_units, use_language_modeling_head, use_next_symbols_head, input_vocabulary_size, output_vocabulary_size, positional_encoding, reset_symbol_ids, use_fsa_features=False, fsa_container=None, fsa_alphabet=None, word_vocab=None, fsa_name=None, fsa_embedding_dim=None, **kwargs):
         if use_fsa_features and fsa_container is None and fsa_name is not None:
             # Reconstruct FSA if loading from saved model
-            fsa_func_name = f'{fsa_name}_structural_fsa_container'
-            if not hasattr(structural_fsas, fsa_func_name):
-                raise ValueError(f"Cannot reconstruct unknown FSA: {fsa_name}")
-            fsa_func = getattr(structural_fsas, fsa_func_name)
-            fsa_container, fsa_alphabet = fsa_func()
+            fsa_container, fsa_alphabet = self._get_fsa_from_name(fsa_name)
 
         if use_fsa_features and word_vocab is None:
             # This should not happen if get_kwargs is called correctly before this.

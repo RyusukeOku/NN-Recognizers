@@ -100,4 +100,4 @@ python src/recognizers/neural_networks/train.py \
   "${progress_args[@]}" \
   --learn-fsa-with-edsm \
   --fsa-embedding-dim 8
-bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir" --device cuda --learn-fsa-with-edsm
+bash src/recognizers/neural_networks/evaluate.bash "$language_dir" "$model_dir" --device cuda
