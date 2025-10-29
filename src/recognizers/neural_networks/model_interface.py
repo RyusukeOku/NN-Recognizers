@@ -242,7 +242,7 @@ class RecognitionModelInterface(ModelInterface):
                 fsa_container = learner.learn(delta=0.005)
                 fsa_alphabet = learner.get_alphabet()
 
-                kwargs['fsa_name'] = 'edsm_learned'
+                kwargs['fsa_name'] = args.fsa_name
                 kwargs['fsa_container'] = fsa_container
                 kwargs['fsa_alphabet'] = fsa_alphabet
                 # --- EDSM学習 終了 ---
@@ -297,7 +297,6 @@ class RecognitionModelInterface(ModelInterface):
         return kwargs
 
     def construct_saver(self, args, vocabulary_data=None, fsa_container=None, fsa_alphabet=None):
-        print(dir(args))
         device = self.get_device(args)
 
         if self.use_load and getattr(args, 'load_model', None) is not None:
