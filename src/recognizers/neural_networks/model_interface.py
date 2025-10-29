@@ -239,7 +239,8 @@ class RecognitionModelInterface(ModelInterface):
 
                 # EDSM学習の実行とコンテナへの変換
                 # TODO: --edsm-delta のような引数を追加して delta を渡せるようにするのが望ましい
-                fsa_container, fsa_alphabet = learner.learn(delta=0.005)
+                fsa_container = learner.learn(delta=0.005)
+                fsa_alphabet = learner.get_alphabet()
 
                 kwargs['fsa_name'] = 'edsm_learned'
                 kwargs['fsa_container'] = fsa_container
