@@ -127,8 +127,7 @@ class EDSMLearner:
                 transition = FiniteAutomatonTransition(
                     state_from=state_id,
                     symbol=symbol_id,
-                    state_to=target_state_id,
-                    weight=0.0
+                    state_to=target_state_id
                 )
                 container.add_transition(transition)
         
