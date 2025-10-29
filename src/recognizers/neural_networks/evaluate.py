@@ -136,21 +136,6 @@ def main():
         labels_txt_path = args.training_data / 'labels.txt'
         rpni_learner = RPNILearner.from_files(main_tok_path, labels_txt_path, vocab)
         fsa_container = rpni_learner.learn()
-    # elif args.learn_fsa_with_edsm:
-    #     print('Learning FSA with EDSM for evaluation...')
-    #     from recognizers.automata.edsm_learner import EDSMLearner
-    #     from rau.vocab import ToIntVocabularyBuilder
-    #     if vocabulary_data is None:
-    #         vocabulary_data = load_vocabulary_data(args, parser)
-    #     vocab, _ = model_interface.get_vocabularies(
-    #         vocabulary_data,
-    #         builder=ToIntVocabularyBuilder()
-    #     )
-    #     main_tok_path = args.training_data / 'main.tok'
-    #     labels_txt_path = args.training_data / 'labels.txt'
-    #     edsm_learner = EDSMLearner.from_files(main_tok_path, labels_txt_path, vocab)
-    #     fsa_container = edsm_learner.learn()
-    #     fsa_alphabet = edsm_learner.get_alphabet()
 
     saver = model_interface.construct_saver(args, vocabulary_data=vocabulary_data, fsa_container=fsa_container, fsa_alphabet=fsa_alphabet)
     for dataset in args.datasets:

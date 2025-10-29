@@ -325,37 +325,15 @@ class RecognitionModelInterface(ModelInterface):
             # and uses our fully reconstructed kwargs instead.
             def model_constructor_wrapper(**ignored_kwargs):
                 nonlocal fsa_container, fsa_alphabet
-                # EDSMオートマトンの(再)学習（ロード時）
-                if getattr(temp_args, 'learn_fsa_with_edsm', False):
-                    from src.recognizers.automata.edsm_learner import EDSMLearner
-                    main_tok_path = args.training_data / 'main.tok'
-                    labels_path = args.training_data / 'labels.txt'
-
-                    edsm_vocab, _ = get_vocabularies(
-                        vocabulary_data, use_bos=False, use_eos=False
-                    )
-                    print("Re-initializing EDSMLearner from files for model loading...")
-                    learner = EDSMLearner.from_files(main_tok_path, labels_path, edsm_vocab)
-
-                    # TODO: 学習時と同じ delta を使う
-                    fsa_container = learner.learn(delta=0.005) 
-                    fsa_alphabet = learner.get_alphabet()
-
+                
+                # get_kwargsによってFSAがすでに準備されているはず。
+                # ここでは、evaluate.pyなどから直接FSAが渡された場合のみを処理する。
+                if fsa_container is not None and 'fsa_container' not in full_kwargs_for_construction:
                     full_kwargs_for_construction['fsa_container'] = fsa_container
                     full_kwargs_for_construction['fsa_alphabet'] = fsa_alphabet
                     full_kwargs_for_construction['use_fsa_features'] = True
 
-                    # word_vocab (BOS/EOSあり) も再構築
-                    uses_bos = full_kwargs_for_construction['architecture'] == 'transformer'
-                    uses_output_vocab = full_kwargs_for_construction['use_language_modeling_head'] or full_kwargs_for_construction['use_next_symbols_head']
-                    input_vocab, _ = get_vocabularies(
-                        vocabulary_data, use_bos=uses_bos, use_eos=uses_output_vocab
-                    )
-                    full_kwargs_for_construction['word_vocab'] = input_vocab
-                elif fsa_container is not None:
-                    full_kwargs_for_construction['fsa_container'] = fsa_container
-                    full_kwargs_for_construction['fsa_alphabet'] = fsa_alphabet
-                    full_kwargs_for_construction['use_fsa_features'] = True
+                    # FSAを使用する場合は、word_vocabも再構築する必要がある
                     uses_bos = full_kwargs_for_construction['architecture'] == 'transformer'
                     uses_output_vocab = full_kwargs_for_construction['use_language_modeling_head'] or full_kwargs_for_construction['use_next_symbols_head']
                     input_vocab, _ = get_vocabularies(
@@ -364,6 +342,7 @@ class RecognitionModelInterface(ModelInterface):
                         use_eos=uses_output_vocab
                     )
                     full_kwargs_for_construction['word_vocab'] = input_vocab
+
                 return self.construct_model(**full_kwargs_for_construction)
 
             # read_saver will use our wrapper to build the model shell,
