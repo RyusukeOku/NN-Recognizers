@@ -115,12 +115,8 @@ class EDSMLearner:
                 try:
                     symbol_id = self.vocab.to_int(symbol_str)
                 except KeyError:
-                    # RPNILearner と同じ警告処理
-                    if hasattr(self.vocab, 'unk_index') and self.vocab.unk_index is not None:
-                        symbol_id = self.vocab.unk_index
-                    else:
-                        print(f"Warning: Symbol '{symbol_str}' from learned DFA not in vocabulary. Skipping transition.")
-                        continue
+                    print(f"Warning: Symbol '{symbol_str}' from learned DFA not in vocabulary. Skipping transition.")
+                    continue
                 
                 if target_aalpy_state not in state_map:
                     print(f"Warning: Target state {target_aalpy_state.state_id} not in state map. Skipping.")
