@@ -325,6 +325,7 @@ class RecognitionModelInterface(ModelInterface):
             # This wrapper ignores the kwargs passed by read_saver (from kwargs.json)
             # and uses our fully reconstructed kwargs instead.
             def model_constructor_wrapper(**ignored_kwargs):
+                nonlocal fsa_container, fsa_alphabet
                 # EDSMオートマトンの(再)学習（ロード時）
                 if getattr(temp_args, 'learn_fsa_with_edsm', False):
                     from src.recognizers.automata.edsm_learner import EDSMLearner
