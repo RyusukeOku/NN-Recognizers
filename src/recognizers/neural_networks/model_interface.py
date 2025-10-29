@@ -297,6 +297,7 @@ class RecognitionModelInterface(ModelInterface):
         return kwargs
 
     def construct_saver(self, args, vocabulary_data=None, fsa_container=None, fsa_alphabet=None):
+        print(dir(args))
         device = self.get_device(args)
 
         if self.use_load and getattr(args, 'load_model', None) is not None:
