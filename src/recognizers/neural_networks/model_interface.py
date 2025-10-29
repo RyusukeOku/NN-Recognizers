@@ -171,6 +171,7 @@ class RecognitionModelInterface(ModelInterface):
         group.add_argument('--learn-fsa-with-edsm', action='store_true', default=False,
             help='Learn an FSA with EDSM from the training data and use it in the model.')
 
+
     def get_kwargs(self, args, vocabulary_data):
         uses_bos = args.architecture == 'transformer' or (args.architecture == 'hybrid_csg' and args.hybrid_base_architecture == 'transformer')
         uses_output_vocab = args.use_language_modeling_head or args.use_next_symbols_head
@@ -217,33 +218,41 @@ class RecognitionModelInterface(ModelInterface):
             if kwargs.get('fsa_embedding_dim') is None:
                     raise ValueError('--fsa-embedding-dim is required when using --use-fsa-features')
 
-            # トレーニングパスでのみFSAを学習/ロードする
-            if not self.use_load:
-                fsa_name = getattr(args, 'fsa_name', None)
-                if getattr(args, 'learn_fsa_with_edsm', False):
-                    fsa_name = 'edsm_learned'
-                    # --- EDSM学習を実行 ---
-                    from src.recognizers.automata.edsm_learner import EDSMLearner
-                    if not hasattr(args, 'training_data') or args.training_data is None:
-                        raise ValueError("--training-data (for main.tok/labels.txt) is required when using --learn-fsa-with-edsm")
-                    main_tok_path = args.training_data / 'main.tok'
-                    labels_path = args.training_data / 'labels.txt'
-                    edsm_vocab, _ = get_vocabularies(
-                        vocabulary_data, use_bos=False, use_eos=False, builder=ToIntVocabularyBuilder()
-                    )
-                    print("Initializing EDSMLearner from files...")
-                    learner = EDSMLearner.from_files(main_tok_path, labels_path, edsm_vocab)
-                    fsa_container = learner.learn(delta=0.005)
-                    fsa_alphabet = learner.get_alphabet()
-                    kwargs['fsa_container'] = fsa_container
-                    kwargs['fsa_alphabet'] = fsa_alphabet
-                
-                elif fsa_name is not None:
-                    fsa_container, fsa_alphabet = self._get_fsa_from_name(fsa_name)
-                    kwargs['fsa_container'] = fsa_container
-                    kwargs['fsa_alphabet'] = fsa_alphabet
-                
-                kwargs['fsa_name'] = fsa_name
+
+            if getattr(args, 'learn_fsa_with_edsm', False):
+                # --- EDSM学習を実行 ---
+                from src.recognizers.automata.edsm_learner import EDSMLearner
+
+                if not hasattr(args, 'training_data') or args.training_data is None:
+                    raise ValueError("--training-data (for main.tok/labels.txt) is required when using --learn-fsa-with-edsm")
+
+                main_tok_path = args.training_data / 'main.tok'
+                labels_path = args.training_data / 'labels.txt'
+
+                # EDSM学習器を初期化 (ボキャブラリはBOS/EOSなしで構築)
+                edsm_vocab, _ = get_vocabularies(
+                    vocabulary_data, use_bos=False, use_eos=False, builder=ToIntVocabularyBuilder()
+                )
+
+                print("Initializing EDSMLearner from files...")
+                learner = EDSMLearner.from_files(main_tok_path, labels_path, edsm_vocab)
+
+                # EDSM学習の実行とコンテナへの変換
+                # TODO: --edsm-delta のような引数を追加して delta を渡せるようにするのが望ましい
+                fsa_container = learner.learn(delta=0.005)
+                fsa_alphabet = learner.get_alphabet()
+
+                kwargs['fsa_name'] = 'edsm_learned'
+                kwargs['fsa_container'] = fsa_container
+                kwargs['fsa_alphabet'] = fsa_alphabet
+                # --- EDSM学習 終了 ---
+
+            elif getattr(args, 'fsa_name', None) is not None and getattr(args, 'fsa_name') != 'edsm_learned':
+                fsa_container, fsa_alphabet = self._get_fsa_from_name(args.fsa_name)
+
+                kwargs['fsa_name'] = args.fsa_name
+                kwargs['fsa_container'] = fsa_container
+                kwargs['fsa_alphabet'] = fsa_alphabet
 
         return kwargs
 
@@ -310,56 +319,51 @@ class RecognitionModelInterface(ModelInterface):
                     raise ValueError("--training-data is required to load vocabulary for evaluation.")
                 vocabulary_data = load_vocabulary_data(args, self.parser)
 
-            # get_kwargsはFSAのコンテナを準備しないので、ここで準備する
             full_kwargs_for_construction = self.get_kwargs(temp_args, vocabulary_data)
 
+            # This wrapper ignores the kwargs passed by read_saver (from kwargs.json)
+            # and uses our fully reconstructed kwargs instead.
             def model_constructor_wrapper(**ignored_kwargs):
-                # モデルのロード時に、FSAの学習/読み込みに関する全てのロジックをここに集約する
                 nonlocal fsa_container, fsa_alphabet
+                # EDSMオートマトンの(再)学習（ロード時）
+                if getattr(temp_args, 'learn_fsa_with_edsm', False):
+                    from src.recognizers.automata.edsm_learner import EDSMLearner
+                    main_tok_path = args.training_data / 'main.tok'
+                    labels_path = args.training_data / 'labels.txt'
 
-                if full_kwargs_for_construction.get('use_fsa_features', False):
-                    fsa_name = full_kwargs_for_construction.get('fsa_name')
+                    edsm_vocab, _ = get_vocabularies(
+                        vocabulary_data, use_bos=False, use_eos=False
+                    )
+                    print("Re-initializing EDSMLearner from files for model loading...")
+                    learner = EDSMLearner.from_files(main_tok_path, labels_path, edsm_vocab)
 
-                    # EDSMで学習されたモデルの場合、FSAを再学習する
-                    if getattr(temp_args, 'learn_fsa_with_edsm', False) or fsa_name == 'edsm_learned':
-                        from src.recognizers.automata.edsm_learner import EDSMLearner
-                        main_tok_path = args.training_data / 'main.tok'
-                        labels_path = args.training_data / 'labels.txt'
+                    # TODO: 学習時と同じ delta を使う
+                    fsa_container = learner.learn(delta=0.005) 
+                    fsa_alphabet = learner.get_alphabet()
 
-                        edsm_vocab, _ = get_vocabularies(
-                            vocabulary_data, use_bos=False, use_eos=False, builder=ToIntVocabularyBuilder()
-                        )
-                        print("Re-initializing EDSMLearner from files for model loading...")
-                        learner = EDSMLearner.from_files(main_tok_path, labels_path, edsm_vocab)
+                    full_kwargs_for_construction['fsa_container'] = fsa_container
+                    full_kwargs_for_construction['fsa_alphabet'] = fsa_alphabet
+                    full_kwargs_for_construction['use_fsa_features'] = True
 
-                        # TODO: 学習時と同じ delta を使う
-                        learned_container = learner.learn(delta=0.005) 
-                        learned_alphabet = learner.get_alphabet()
-
-                        full_kwargs_for_construction['fsa_container'] = learned_container
-                        full_kwargs_for_construction['fsa_alphabet'] = learned_alphabet
-
-                    # 名前付きFSAの場合、名前からFSAを読み込む
-                    elif fsa_name is not None:
-                        loaded_container, loaded_alphabet = self._get_fsa_from_name(fsa_name)
-                        full_kwargs_for_construction['fsa_container'] = loaded_container
-                        full_kwargs_for_construction['fsa_alphabet'] = loaded_alphabet
-
-                    # evaluate.py のような外部スクリプトから直接渡されたFSAを処理する
-                    if fsa_container is not None:
-                        full_kwargs_for_construction['fsa_container'] = fsa_container
-                        full_kwargs_for_construction['fsa_alphabet'] = fsa_alphabet
-
-                    # FSAを使う場合、word_vocabも再構築する必要がある
-                    if full_kwargs_for_construction.get('fsa_container'):
-                        full_kwargs_for_construction['use_fsa_features'] = True
-                        uses_bos = full_kwargs_for_construction['architecture'] == 'transformer'
-                        uses_output_vocab = full_kwargs_for_construction['use_language_modeling_head'] or full_kwargs_for_construction['use_next_symbols_head']
-                        input_vocab, _ = get_vocabularies(
-                            vocabulary_data, use_bos=uses_bos, use_eos=uses_output_vocab
-                        )
-                        full_kwargs_for_construction['word_vocab'] = input_vocab
-
+                    # word_vocab (BOS/EOSあり) も再構築
+                    uses_bos = full_kwargs_for_construction['architecture'] == 'transformer'
+                    uses_output_vocab = full_kwargs_for_construction['use_language_modeling_head'] or full_kwargs_for_construction['use_next_symbols_head']
+                    input_vocab, _ = get_vocabularies(
+                        vocabulary_data, use_bos=uses_bos, use_eos=uses_output_vocab
+                    )
+                    full_kwargs_for_construction['word_vocab'] = input_vocab
+                elif fsa_container is not None:
+                    full_kwargs_for_construction['fsa_container'] = fsa_container
+                    full_kwargs_for_construction['fsa_alphabet'] = fsa_alphabet
+                    full_kwargs_for_construction['use_fsa_features'] = True
+                    uses_bos = full_kwargs_for_construction['architecture'] == 'transformer'
+                    uses_output_vocab = full_kwargs_for_construction['use_language_modeling_head'] or full_kwargs_for_construction['use_next_symbols_head']
+                    input_vocab, _ = get_vocabularies(
+                        vocabulary_data,
+                        use_bos=uses_bos,
+                        use_eos=uses_output_vocab
+                    )
+                    full_kwargs_for_construction['word_vocab'] = input_vocab
                 return self.construct_model(**full_kwargs_for_construction)
 
             # read_saver will use our wrapper to build the model shell,
@@ -381,6 +385,19 @@ class RecognitionModelInterface(ModelInterface):
             # --- TRAINING PATH ---
             if self.use_init:
                 kwargs = self.get_kwargs(args, vocabulary_data)
+                if fsa_container is not None:
+                    kwargs['fsa_container'] = fsa_container
+                    kwargs['fsa_alphabet'] = fsa_alphabet
+                    kwargs['use_fsa_features'] = True
+                    kwargs['fsa_embedding_dim'] = args.fsa_embedding_dim
+                    uses_bos = kwargs['architecture'] == 'transformer'
+                    uses_output_vocab = kwargs['use_language_modeling_head'] or kwargs['use_next_symbols_head']
+                    input_vocab, _ = get_vocabularies(
+                        vocabulary_data,
+                        use_bos=uses_bos,
+                        use_eos=uses_output_vocab
+                    )
+                    kwargs['word_vocab'] = input_vocab
                 output = args.output
                 # Construct the saver, which also constructs the model
                 saver = construct_saver(self.construct_model, output, **kwargs)
