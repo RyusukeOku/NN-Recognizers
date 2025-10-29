@@ -37,6 +37,7 @@ import json
 from pathlib import Path
 from .data import load_vocabulary_data
 import random
+from libs.rau.src.rau.vocab.to_int import ToIntVocabularyBuilder
 
 @dataclasses.dataclass
 class ModelInput:
@@ -230,7 +231,7 @@ class RecognitionModelInterface(ModelInterface):
 
                 # EDSM学習器を初期化 (ボキャブラリはBOS/EOSなしで構築)
                 edsm_vocab, _ = get_vocabularies(
-                    vocabulary_data, use_bos=False, use_eos=False
+                    vocabulary_data, use_bos=False, use_eos=False, builder=ToIntVocabularyBuilder()
                 )
 
                 print("Initializing EDSMLearner from files...")
