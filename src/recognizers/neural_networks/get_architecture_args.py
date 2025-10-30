@@ -77,12 +77,14 @@ def main():
         if args.architecture == 'rnn':
             a = 2 * num_layers
             b = vocab_size + 2 * num_layers + 1
+            hidden_units = 70
         else:
             a = 8 * num_layers
             b = vocab_size + 5 * num_layers + 1
+            hidden_units = 32
         c = 1 - args.parameter_budget
         hidden_units_float = (-b + math.sqrt(b * b - 4 * a * c)) / (2 * a)
-        hidden_units = round(hidden_units_float)
+        # hidden_units = round(hidden_units_float)
         outputs.extend([
             '--hidden-units', str(hidden_units)
         ])
